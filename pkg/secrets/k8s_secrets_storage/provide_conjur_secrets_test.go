@@ -64,6 +64,7 @@ func (m testMocks) newProvider(requiredSecrets []string) K8sProvider {
 			k8s: k8sAccessDeps{
 				m.kubeClient.RetrieveSecret,
 				m.kubeClient.UpdateSecret,
+				nil, //todo
 			},
 			conjur: conjurAccessDeps{
 				m.conjurClient.RetrieveSecrets,
