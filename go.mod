@@ -71,11 +71,11 @@ require (
 
 // Automated release process replaces
 // DO NOT EDIT: CHANGES TO THE 3 BELOW LINES WILL BREAK AUTOMATED RELEASES
-replace github.com/cyberark/conjur-api-go => github.com/cyberark/conjur-api-go latest
+replace github.com/cyberark/conjur-api-go => github.com/cyberark/conjur-api-go v0.11.1
 
-replace github.com/cyberark/conjur-authn-k8s-client => github.com/cyberark/conjur-authn-k8s-client latest
+replace github.com/cyberark/conjur-authn-k8s-client => github.com/cyberark/conjur-authn-k8s-client v0.25.1
 
-replace github.com/cyberark/conjur-opentelemetry-tracer => github.com/cyberark/conjur-opentelemetry-tracer latest
+replace github.com/cyberark/conjur-opentelemetry-tracer => github.com/cyberark/conjur-opentelemetry-tracer v0.0.1-1129
 
 // Security fixes to ensure we don't have old vulnerable packages in our
 // dependency tree.  Only put specific versions on the left side of the =>
