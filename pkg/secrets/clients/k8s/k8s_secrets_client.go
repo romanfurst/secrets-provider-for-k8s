@@ -14,6 +14,7 @@ import (
 
 type RetrieveK8sSecretFunc func(namespace string, secretName string) (*v1.Secret, error)
 type UpdateK8sSecretFunc func(namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte) error
+type RetrieveK8sSecretListFunc func(namespace string) (*v1.SecretList, error)
 
 func RetrieveK8sSecret(namespace string, secretName string) (*v1.Secret, error) {
 	// get K8s client object
@@ -49,6 +50,12 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 	}
 
 	return nil
+}
+
+func RetrieveK8sSecretList(namespace string) (*v1.SecretList, error) {
+	kubeClient, _ := configK8sClient()
+	log.Info("Retrieving labeled Kubernetes secrets from namespace '%s'", namespace)
+	return kubeClient.CoreV1().Secrets(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "conjur.org/application-mode=true"})
 }
 
 func configK8sClient() (*kubernetes.Clientset, error) {
