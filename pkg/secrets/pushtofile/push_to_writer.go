@@ -15,7 +15,7 @@ import (
 )
 
 // templateData describes the form in which data is presented to push-to-file templates
-type templateData struct {
+type TemplateData struct {
 	SecretsArray []*Secret
 	SecretsMap   map[string]*Secret
 }
@@ -97,11 +97,11 @@ func pushToWriter(
 	}
 
 	// Render the secret file content
-	tplData := templateData{
+	tplData := TemplateData{
 		SecretsArray: groupSecrets,
 		SecretsMap:   secretsMap,
 	}
-	fileContent, err := renderFile(tpl, tplData)
+	fileContent, err := RenderFile(tpl, tplData)
 	if err != nil {
 		return false, err
 	}
@@ -109,7 +109,7 @@ func pushToWriter(
 	return writeContent(writer, fileContent, groupName)
 }
 
-func renderFile(tpl *template.Template, tplData templateData) (*bytes.Buffer, error) {
+func RenderFile(tpl *template.Template, tplData TemplateData) (*bytes.Buffer, error) {
 	buf := &bytes.Buffer{}
 	err := tpl.Execute(buf, tplData)
 	return buf, err
@@ -138,4 +138,3 @@ func writeContent(writer io.Writer, fileContent *bytes.Buffer, groupName string)
 
 	return true, nil
 }
-
