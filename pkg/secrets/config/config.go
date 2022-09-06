@@ -17,6 +17,8 @@ const (
 	K8s                       = "k8s_secrets"
 	File                      = "file"
 	ConjurMapKey              = "conjur-map"
+	ConjurVarsKey             = "conjur-vars"
+	ConjurResolverKey         = "conjur-resolver"
 	DefaultRetryCountLimit    = 5
 	DefaultRetryIntervalSec   = 1
 	MinRetryValue             = 0
