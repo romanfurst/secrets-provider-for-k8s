@@ -14,8 +14,10 @@ import (
 )
 
 const secretGroupPrefix = "conjur.org/conjur-secrets."
+const SecretGroupPrefix = secretGroupPrefix
 const secretGroupPolicyPathPrefix = "conjur.org/conjur-secrets-policy-path."
 const secretGroupFileTemplatePrefix = "conjur.org/secret-file-template."
+const SecretGroupFileTemplatePrefix = secretGroupFileTemplatePrefix
 const secretGroupFilePathPrefix = "conjur.org/secret-file-path."
 const secretGroupFileFormatPrefix = "conjur.org/secret-file-format."
 const secretGroupFilePermissionsPrefix = "conjur.org/secret-file-permissions."

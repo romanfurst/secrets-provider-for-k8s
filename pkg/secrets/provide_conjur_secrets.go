@@ -147,7 +147,7 @@ func repeatableSecretProvider(
 			return err
 		}
 
-		if _, err = provideSecrets(); err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
+		if _, err = provideSecrets(k8sProviderConfig.RequiredK8sSecrets...); err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
 			return err
 		}
 		if err == nil {
@@ -170,7 +170,7 @@ func repeatableSecretProvider(
 				periodicQuit:  periodicQuit,
 				periodicError: periodicError,
 			}
-			go periodicSecretProvider(provideSecrets, config, status)
+			go periodicSecretProvider(provideSecrets, config, status, k8sProviderConfig.RequiredK8sSecrets...)
 		default:
 			// Run once and sleep forever if in sidecar mode without
 			// periodic refresh (fall through)
@@ -207,6 +207,7 @@ func periodicSecretProvider(
 	provideSecrets ProviderFunc,
 	config periodicConfig,
 	status statusUpdater,
+	requiredK8sSecrets ...string,
 ) {
 	for {
 		select {
@@ -214,7 +215,7 @@ func periodicSecretProvider(
 			return
 		case <-config.ticker.C:
 			log.Info("Run provideSecrets()")
-			updated, err := provideSecrets()
+			updated, err := provideSecrets(requiredK8sSecrets...)
 			if err == nil && updated {
 				log.Info("secret updated")
 				err = status.setSecretsUpdated()

@@ -34,6 +34,11 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 	// get K8s client object
 	kubeClient, _ := configK8sClient()
 
+	if originalK8sSecret.Data == nil {
+		originalK8sSecret.Data = map[string][]byte{}
+		log.Debug("Create data entry in %s", secretName)
+	}
+
 	for secretName, secretValue := range stringDataEntriesMap {
 		originalK8sSecret.Data[secretName] = secretValue
 	}
