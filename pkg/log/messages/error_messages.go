@@ -70,6 +70,7 @@ const CSPFK048E string = "CSPFK048E Secrets Provider in K8s Secrets mode require
 const CSPFK049E string = "CSPFK049E Failed to validate Pod annotations"
 const CSPFK050E string = "CSPFK050E Invalid secrets refresh interval annotation: %s %s"
 const CSPFK051E string = "CSPFK051E Invalid secrets refresh configuration: %s %s"
+const CSPFK052E string = "CSPFK052E Annotation %s content malformed for '%s' secret. Reason: %s"
 
 // Push to File
 const CSPFK053E string = "CSPFK053E Unable to initialize Secrets Provider: unable to create secret group collection"
