@@ -75,7 +75,7 @@ func (retriever secretRetriever) Retrieve(variableIDs []string, traceContext con
 }
 
 func retrieveConjurSecrets(accessToken []byte, variableIDs []string) (map[string][]byte, error) {
-	log.Info(messages.CSPFK003I, variableIDs)
+	log.Debug(messages.CSPFK003I, variableIDs)
 
 	if len(variableIDs) == 0 {
 		log.Info(messages.CSPFK016I)
