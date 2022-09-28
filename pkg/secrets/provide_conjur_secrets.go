@@ -124,15 +124,17 @@ type ProviderRefreshConfig struct {
 func RepeatableSecretProvider(
 	refreshConfig ProviderRefreshConfig,
 	provideSecrets ProviderFunc,
+	namespace string,
 ) RepeatableProviderFunc {
 	return repeatableSecretProvider(refreshConfig, provideSecrets,
-		defaultStatusUpdater)
+		defaultStatusUpdater, namespace)
 }
 
 func repeatableSecretProvider(
 	config ProviderRefreshConfig,
 	provideSecrets ProviderFunc,
 	status statusUpdater,
+	namespace string,
 ) RepeatableProviderFunc {
 
 	var periodicQuit = make(chan struct{})
@@ -153,12 +155,18 @@ func repeatableSecretProvider(
 			return err
 		}
 		switch {
-		case config.Mode != "sidecar":
+		case config.Mode != "sidecar" && config.Mode != "application":
 			// Run once and return if not in sidecar mode
 			return nil
-		case config.SecretRefreshInterval > 0:
+		case config.Mode == "application":
+			//todo go ?
+			//go k8s.WatchK8sSecret(namespace)
+			config.SecretRefreshInterval = time.Minute
+			//case config.SecretRefreshInterval > 0: //fixme
+			log.Info("Refresh interval %s", config.SecretRefreshInterval)
 			// Run periodically if in sidecar mode with periodic refresh
-			ticker = time.NewTicker(config.SecretRefreshInterval)
+			//ticker = time.NewTicker(config.SecretRefreshInterval)
+			ticker = time.NewTicker(time.Minute)
 			config := periodicConfig{
 				ticker:        ticker,
 				periodicQuit:  periodicQuit,
@@ -207,8 +215,10 @@ func periodicSecretProvider(
 		case <-config.periodicQuit:
 			return
 		case <-config.ticker.C:
+			log.Info("Run provideSecrets()")
 			updated, err := provideSecrets()
 			if err == nil && updated {
+				log.Info("secret updated")
 				err = status.setSecretsUpdated()
 			}
 			if err != nil {

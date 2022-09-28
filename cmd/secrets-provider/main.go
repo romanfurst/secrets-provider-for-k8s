@@ -207,6 +207,7 @@ func repeatableSecretsProvider(
 	repeatableProvideSecrets := secrets.RepeatableSecretProvider(
 		refreshConfig,
 		provideSecrets,
+		providerConfig.K8sProviderConfig.PodNamespace,
 	)
 	return repeatableProvideSecrets, secretsConfig, nil
 }

@@ -299,7 +299,7 @@ func TestRepeatableSecretProvider(t *testing.T) {
 				ProviderQuit:          providerQuit,
 			}
 			provideSecrets := repeatableSecretProvider(
-				refreshConfig, tc.provider.provide, fileUpdater)
+				refreshConfig, tc.provider.provide, fileUpdater, "todo")
 
 			// Run the secrets provider
 			testError := make(chan error)

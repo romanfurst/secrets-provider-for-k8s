@@ -198,9 +198,9 @@ func ValidateSecretsProviderSettings(envAndAnnots map[string]string) ([]error, [
 	annotK8sSecretsStr := envAndAnnots[k8sSecretsKey]
 	if storeType == "k8s_secrets" {
 		if envK8sSecretsStr == "" && annotK8sSecretsStr == "" {
-			errorList = append(errorList, errors.New(messages.CSPFK048E))
+			//errorList = append(errorList, errors.New(messages.CSPFK048E))
 		} else if envK8sSecretsStr != "" && annotK8sSecretsStr != "" {
-			infoList = append(infoList, fmt.Errorf(messages.CSPFK012I, "RequiredK8sSecrets", "K8S_SECRETS", k8sSecretsKey))
+			//nfoList = append(infoList, fmt.Errorf(messages.CSPFK012I, "RequiredK8sSecrets", "K8S_SECRETS", k8sSecretsKey))
 		}
 	}
 
@@ -396,7 +396,7 @@ func validRefreshInterval(intervalStr string, enableStr string, envAndAnnots map
 	}
 
 	if intervalStr != "" || enableStr != "" {
-		if containerMode != "sidecar" {
+		if containerMode != "sidecar" && containerMode != "application" {
 			return fmt.Errorf(messages.CSPFK051E, "Secrets refresh is enabled while container mode is set to", containerMode)
 		}
 		enabled, _ := strconv.ParseBool(enableStr)
