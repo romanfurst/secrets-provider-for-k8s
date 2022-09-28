@@ -128,6 +128,7 @@ func RunSecretsProvider(
 	config ProviderRefreshConfig,
 	provideSecrets ProviderFunc,
 	status StatusUpdater,
+	namespace string,
 ) error {
 
 	var periodicQuit = make(chan struct{})
@@ -138,19 +139,22 @@ func RunSecretsProvider(
 	if err = status.CopyScripts(); err != nil {
 		return err
 	}
-	if _, err = provideSecrets(); err != nil {
-		// Return immediately upon error, regardless of operating mode
+	if _, err = provideSecrets(); err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
 		return err
 	}
-	err = status.SetSecretsProvided()
-	if err != nil {
-		return err
+	if err == nil {
+		err = status.SetSecretsProvided()
+		if err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
+			return err
+		}
 	}
 	switch {
-	case config.Mode != "sidecar":
+	case config.Mode != "sidecar" && config.Mode != "application":
 		// Run once and return if not in sidecar mode
 		return nil
 	case config.SecretRefreshInterval > 0:
+	case config.Mode == "application":
+		log.Info("Refresh interval %s", config.SecretRefreshInterval)
 		// Run periodically if in sidecar mode with periodic refresh
 		ticker = time.NewTicker(config.SecretRefreshInterval)
 		config := periodicConfig{
@@ -200,13 +204,15 @@ func periodicSecretProvider(
 		case <-config.periodicQuit:
 			return
 		case <-config.ticker.C:
+			log.Info("Run provideSecrets()")
 			updated, err := provideSecrets()
 			if err == nil && updated {
+				log.Info("secret updated")
 				err = status.SetSecretsUpdated()
 			}
-			if err != nil {
+			/*if err != nil {
 				config.periodicError <- err
-			}
+			}*/
 		}
 	}
 }
