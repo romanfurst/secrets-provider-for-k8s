@@ -21,6 +21,7 @@ require (
 	github.com/go-openapi/jsonreference v0.19.5 // indirect
 	github.com/go-openapi/swag v0.19.14 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
+	github.com/google/go-cmp v0.5.8 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -66,11 +67,11 @@ require (
 
 // Automated release process replaces
 // DO NOT EDIT: CHANGES TO THE 3 BELOW LINES WILL BREAK AUTOMATED RELEASES
-replace github.com/cyberark/conjur-api-go => github.com/cyberark/conjur-api-go latest
+replace github.com/cyberark/conjur-api-go => github.com/cyberark/conjur-api-go v0.10.1
 
-replace github.com/cyberark/conjur-authn-k8s-client => github.com/cyberark/conjur-authn-k8s-client latest
+replace github.com/cyberark/conjur-authn-k8s-client => github.com/cyberark/conjur-authn-k8s-client v0.23.7
 
-replace github.com/cyberark/conjur-opentelemetry-tracer => github.com/cyberark/conjur-opentelemetry-tracer latest
+replace github.com/cyberark/conjur-opentelemetry-tracer => github.com/cyberark/conjur-opentelemetry-tracer v0.0.1-478
 
 // Security fixes to ensure we don't have old vulnerable packages in our
 // dependency tree.  Only put specific versions on the left side of the =>

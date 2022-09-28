@@ -124,15 +124,17 @@ type ProviderRefreshConfig struct {
 func RepeatableSecretProvider(
 	refreshConfig ProviderRefreshConfig,
 	provideSecrets ProviderFunc,
+	namespace string,
 ) RepeatableProviderFunc {
 	return repeatableSecretProvider(refreshConfig, provideSecrets,
-		defaultStatusUpdater)
+		defaultStatusUpdater, namespace)
 }
 
 func repeatableSecretProvider(
 	config ProviderRefreshConfig,
 	provideSecrets ProviderFunc,
 	status statusUpdater,
+	namespace string,
 ) RepeatableProviderFunc {
 
 	var periodicQuit = make(chan struct{})
@@ -144,19 +146,23 @@ func repeatableSecretProvider(
 		if err = status.copyScripts(); err != nil {
 			return err
 		}
-		if _, err = provideSecrets(); err != nil {
-			// Return immediately upon error, regardless of operating mode
+
+		if _, err = provideSecrets(); err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
 			return err
 		}
-		err = status.setSecretsProvided()
-		if err != nil {
-			return err
+		if err == nil {
+			err = status.setSecretsProvided()
+			if err != nil && (config.Mode != "sidecar" && config.Mode != "application") {
+				return err
+			}
 		}
+
 		switch {
-		case config.Mode != "sidecar":
+		case config.Mode != "sidecar" && config.Mode != "application":
 			// Run once and return if not in sidecar mode
 			return nil
-		case config.SecretRefreshInterval > 0:
+		case config.Mode == "application":
+			log.Info("Refresh interval %s", config.SecretRefreshInterval)
 			// Run periodically if in sidecar mode with periodic refresh
 			ticker = time.NewTicker(config.SecretRefreshInterval)
 			config := periodicConfig{
@@ -207,13 +213,15 @@ func periodicSecretProvider(
 		case <-config.periodicQuit:
 			return
 		case <-config.ticker.C:
+			log.Info("Run provideSecrets()")
 			updated, err := provideSecrets()
 			if err == nil && updated {
+				log.Info("secret updated")
 				err = status.setSecretsUpdated()
 			}
-			if err != nil {
+			/*if err != nil {
 				config.periodicError <- err
-			}
+			}*/
 		}
 	}
 }

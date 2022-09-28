@@ -183,7 +183,9 @@ func (p K8sProvider) Provide() (bool, error) {
 		return updated, p.log.recordedError(messages.CSPFK023E)
 	}
 
-	p.log.info(messages.CSPFK009I)
+	if updated {
+		p.log.info(messages.CSPFK009I)
+	}
 	return updated, nil
 }
 
@@ -373,8 +375,9 @@ func (p K8sProvider) updateRequiredK8sSecrets(
 			}
 			p.prevSecretsChecksums[k8sSecretName] = checksum
 			updated = true
+			p.log.info("CSPFK009I %s kubernetes secret content updated", k8sSecretName)
 		} else {
-			p.log.info(messages.CSPFK020I)
+			p.log.debug("%s in %s", messages.CSPFK020I, k8sSecretName)
 			updated = false
 		}
 	}

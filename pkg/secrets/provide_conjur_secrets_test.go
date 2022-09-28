@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	k8sSecretsStorage "github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/k8s_secrets_storage"
 	"log"
 	"testing"
 	"time"
@@ -299,7 +300,7 @@ func TestRepeatableSecretProvider(t *testing.T) {
 				ProviderQuit:          providerQuit,
 			}
 			provideSecrets := repeatableSecretProvider(
-				refreshConfig, tc.provider.provide, fileUpdater)
+				refreshConfig, tc.provider.provide, fileUpdater, "todo", k8sSecretsStorage.K8sProviderConfig{PodNamespace: "test"})
 
 			// Run the secrets provider
 			testError := make(chan error)
