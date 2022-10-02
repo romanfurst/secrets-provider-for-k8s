@@ -107,7 +107,6 @@ func NewProvider(
 			k8s: k8sAccessDeps{
 				k8sClient.RetrieveK8sSecret,
 				k8sClient.UpdateK8sSecret,
-				k8sClient.WatchK8sSecret,
 				k8sClient.RetrieveK8sSecretList,
 			},
 			conjur: conjurAccessDeps{
@@ -155,11 +154,12 @@ func newProvider(
 }
 
 // Provide implements a ProviderFunc to retrieve and push secrets to K8s secrets.
-func (p K8sProvider) Provide() (bool, error) {
+// If secrets names is passed as parameter, it override configured secrets to provide
+func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	// Use the global TracerProvider
 	tr := trace.NewOtelTracer(otel.Tracer("secrets-provider"))
 	// Retrieve required K8s Secrets and parse their Data fields.
-	if err := p.retrieveRequiredK8sSecrets(tr); err != nil {
+	if err := p.retrieveRequiredK8sSecrets(tr, secrets...); err != nil {
 		return false, p.log.recordedError(messages.CSPFK021E)
 	}
 	// Retrieve Conjur secrets for all K8s Secrets.
@@ -207,14 +207,41 @@ func (p K8sProvider) removeDeletedSecrets(tr trace.Tracer) error {
 	}
 	return nil
 }
+func (p K8sProvider) Delete(secrets []string) {
+	tr := trace.NewOtelTracer(otel.Tracer("secrets-provider"))
+	emptySecrets := make(map[string][]byte)
+	for _, secret := range secrets {
+		delete(p.prevSecretsChecksums, secret)
+		emptySecrets[secret] = []byte("")
+	}
+	p.updateRequiredK8sSecrets(emptySecrets, tr)
+}
 
 // retrieveRequiredK8sSecrets retrieves all K8s Secrets that need to be
 // managed/updated by the Secrets Provider.
-func (p K8sProvider) retrieveRequiredK8sSecrets(tracer trace.Tracer) error {
+func (p K8sProvider) retrieveRequiredK8sSecrets(tracer trace.Tracer, secrets ...string) error {
 	spanCtx, span := tracer.Start(p.traceContext, "Gather required K8s Secrets")
 	defer span.End()
 
-	k8sSecrets, err := p.k8s.listSecret(p.podNamespace)
+	var err error
+	k8sSecrets := &v1.SecretList{}
+	if secrets != nil && len(secrets) > 0 {
+		p.log.debug("Only specified k8s secrets will be retrieved: %s", secrets)
+		for _, secret := range secrets {
+			k8sSecret, err := p.k8s.retrieveSecret(p.podNamespace, secret)
+			if err != nil {
+				if k8sSecrets.Items == nil {
+					k8sSecrets.Items = []v1.Secret{}
+				}
+				k8sSecrets.Items = append(k8sSecrets.Items, *k8sSecret)
+			}
+		}
+	} else {
+		p.log.debug("All labeled secrets will be retrieved")
+		k8sSecrets, err = p.k8s.listSecret(p.podNamespace)
+	}
+
+	//k8sSecrets, err := p.k8s.listSecret(p.podNamespace)
 	if err != nil {
 		p.log.logError(err.Error())
 		return p.log.recordedError("CSPFK020E Failed to retrieve Kubernetes Secrets from %s namespace", p.podNamespace)
@@ -245,7 +272,7 @@ func (p K8sProvider) retrieveRequiredK8sSecret(k8sSecret v1.Secret) error {
 
 	// Read the value of the "conjur-map" entry in the K8s Secret's Data
 	// field, if it exists. If the entry does not exist or has a null
-	// value, return an error.
+	// value, it will be logged.
 	conjurMapKey := config.ConjurMapKey
 	conjurSecretsYAML, conjurMapExists := k8sSecret.Data[conjurMapKey]
 	if !conjurMapExists {
@@ -255,10 +282,9 @@ func (p K8sProvider) retrieveRequiredK8sSecret(k8sSecret v1.Secret) error {
 		p.log.debug(messages.CSPFK006D, k8sSecret.Name, conjurMapKey)
 	}
 
-	//todo in progress
 	// Read the value of the "conjur-vars" entry in the K8s Secret's Data
 	// field, if it exists. If the entry does not exist or has a null
-	// value, return an error.
+	// value, it will be logged.
 	conjurVarsKey := config.ConjurVarsKey
 	conjurVarsYaml, conjurVarsExists := k8sSecret.Data[conjurVarsKey]
 	if !conjurVarsExists {
@@ -268,12 +294,17 @@ func (p K8sProvider) retrieveRequiredK8sSecret(k8sSecret v1.Secret) error {
 		p.log.debug(messages.CSPFK006D, k8sSecret.Name, conjurMapKey)
 	}
 
-	if !conjurMapExists && !conjurVarsExists {
+	// One of "conjur-map" or "conjur-var" filed must be defined.
+	// If it is not, error is returned
+	if (!conjurMapExists || len(conjurSecretsYAML) == 0) && (!conjurVarsExists || len(conjurVarsYaml) == 0) {
 		return p.log.recordedError("At least on of %s or %s must defined", conjurMapKey, conjurVarsYaml)
 	}
+
+	// If "conjur-var" exist, also "conjur-resolver" field must exist
+	// Otherwise error is returned
 	if conjurVarsExists {
-		if _, ex := k8sSecret.Data[config.ConjurVarsKey]; !ex {
-			return p.log.recordedError("For %s %s must be defined", conjurVarsKey, config.ConjurVarsKey)
+		if _, ex := k8sSecret.Data[config.ConjurResolverKey]; !ex {
+			return p.log.recordedError("For %s %s must be defined", conjurVarsKey, config.ConjurResolverKey)
 		}
 	}
 
