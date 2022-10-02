@@ -99,7 +99,7 @@ func startSecretsProviderWithDeps(
 		return
 	}
 
-	provideSecrets, secretsConfig, err := secretsProvider(
+	provideSecrets, deleteSecrets, secretsConfig, err := secretsProvider(
 		ctx,
 		tracer,
 		secretsBasePath,
@@ -131,7 +131,8 @@ func startSecretsProviderWithDeps(
 		},
 		provideSecrets,
 		statusUpdaterFactory(),
-		secretsConfig.PodNamespace,
+		secretsConfig,
+		deleteSecrets,
 	); err != nil {
 		logError(err.Error())
 	}
@@ -194,7 +195,7 @@ func secretsProvider(
 	templatesBasePath string,
 	secretRetriever conjur.RetrieveSecretsFunc,
 	providerFactory secrets.ProviderFactory,
-) (secrets.ProviderFunc, *secretsConfigProvider.Config, error) {
+) (secrets.ProviderFunc, secrets.DeleterFunc, *secretsConfigProvider.Config, error) {
 	_, span := tracer.Start(ctx, "Create single-use secrets provider")
 	defer span.End()
 
@@ -203,7 +204,7 @@ func secretsProvider(
 	if err != nil {
 		log.Error(err.Error())
 		span.RecordErrorAndSetStatus(err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	providerConfig := &secrets.ProviderConfig{
 		CommonProviderConfig: secrets.CommonProviderConfig{
@@ -225,15 +226,15 @@ func secretsProvider(
 	span.SetAttributes(attribute.String("store_type", secretsConfig.StoreType))
 
 	// Create a secrets provider
-	provideSecrets, errs := providerFactory(ctx,
+	provideSecrets, deleteSecret, errs := providerFactory(ctx,
 		secretRetriever, *providerConfig)
 	if err := logErrorsAndInfos(errs, nil); err != nil {
 		log.Error(messages.CSPFK053E)
 		span.RecordErrorAndSetStatus(errors.New(messages.CSPFK053E))
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return provideSecrets, secretsConfig, nil
+	return provideSecrets, deleteSecret, secretsConfig, nil
 }
 
 func customEnv(key string) string {
