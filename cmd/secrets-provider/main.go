@@ -177,7 +177,7 @@ func repeatableSecretsProvider(
 	span.SetAttributes(attribute.String("store_type", secretsConfig.StoreType))
 
 	// Create a secrets provider
-	provideSecrets, errs := secrets.NewProviderForType(ctx,
+	provideSecrets, deleteSecrest, errs := secrets.NewProviderForType(ctx,
 		secretRetriever.Retrieve, *providerConfig)
 	if err := logErrorsAndInfos(errs, nil); err != nil {
 		log.Error(messages.CSPFK053E)
@@ -207,7 +207,8 @@ func repeatableSecretsProvider(
 	repeatableProvideSecrets := secrets.RepeatableSecretProvider(
 		refreshConfig,
 		provideSecrets,
-		providerConfig.K8sProviderConfig.PodNamespace,
+		deleteSecrest,
+		providerConfig.K8sProviderConfig,
 	)
 	return repeatableProvideSecrets, secretsConfig, nil
 }
