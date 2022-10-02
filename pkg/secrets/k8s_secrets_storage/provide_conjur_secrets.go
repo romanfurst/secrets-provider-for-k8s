@@ -111,7 +111,6 @@ func NewProvider(
 			k8s: k8sAccessDeps{
 				k8sClient.RetrieveK8sSecret,
 				k8sClient.UpdateK8sSecret,
-				/*k8sClient.WatchK8sSecret,*/
 				k8sClient.RetrieveK8sSecretList,
 			},
 			conjur: conjurAccessDeps{
@@ -157,11 +156,12 @@ func newProvider(
 }
 
 // Provide implements a ProviderFunc to retrieve and push secrets to K8s secrets.
-func (p K8sProvider) Provide() (bool, error) {
+// If secrets names is passed as parameter, it override configured secrets to provide
+func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	// Use the global TracerProvider
 	tr := trace.NewOtelTracer(otel.Tracer("secrets-provider"))
 	// Retrieve required K8s Secrets and parse their Data fields.
-	if err := p.retrieveRequiredK8sSecrets(tr); err != nil {
+	if err := p.retrieveRequiredK8sSecrets(tr, secrets...); err != nil {
 		return false, p.log.recordedError(messages.CSPFK021E)
 	}
 	// Retrieve Conjur secrets for all K8s Secrets.
@@ -215,16 +215,26 @@ func (p K8sProvider) removeDeletedSecrets(tr trace.Tracer) error {
 	}
 	return nil
 }
+func (p K8sProvider) Delete(secrets []string) {
+	emptySecrets := make(map[string][]byte)
+	for _, secret := range secrets {
+		delete(p.prevSecretsChecksums, secret)
+		emptySecrets[secret] = []byte("")
+	}
+	for _, secret := range secrets {
+		p.deleteK8sSecret(secret)
+	}
+}
 
 // retrieveRequiredK8sSecrets retrieves all K8s Secrets that need to be
 // managed/updated by the Secrets Provider.
-func (p K8sProvider) retrieveRequiredK8sSecrets(tracer trace.Tracer) error {
+func (p K8sProvider) retrieveRequiredK8sSecrets(tracer trace.Tracer, secrets ...string) error {
 	spanCtx, span := tracer.Start(p.traceContext, "Gather required K8s Secrets")
 	defer span.End()
 
 	var err error
 	k8sSecrets := &v1.SecretList{}
-	/*if secrets != nil && len(secrets) > 0 {
+	if secrets != nil && len(secrets) > 0 {
 		p.log.debug("Only specified k8s secrets will be retrieved: %s", secrets)
 		for _, secret := range secrets {
 			k8sSecret, err := p.k8s.retrieveSecret(p.podNamespace, secret)
@@ -238,17 +248,17 @@ func (p K8sProvider) retrieveRequiredK8sSecrets(tracer trace.Tracer) error {
 				k8sSecrets.Items = append(k8sSecrets.Items, *k8sSecret)
 			}
 		}
-	} else { */
-	p.log.debug("All labeled secrets will be retrieved")
-	k8sSecrets, err = p.k8s.listSecret(p.podNamespace)
-	if err != nil {
-		p.log.logError("CSPFK020E Failed to retrieve labeled Kubernetes Secrets from %s namespace: ", p.podNamespace, err.Error())
-		//return p.log.recordedError("CSPFK020E Failed to retrieve labeled Kubernetes Secrets from %s namespace", p.podNamespace) //TODO return error onlu for non-repeatable mode
+	} else {
+		p.log.debug("All labeled secrets will be retrieved")
+		k8sSecrets, err = p.k8s.listSecret(p.podNamespace)
+		if err != nil {
+			p.log.logError("CSPFK020E Failed to retrieve labeled Kubernetes Secrets from %s namespace: ", p.podNamespace, err.Error())
+			//return p.log.recordedError("CSPFK020E Failed to retrieve labeled Kubernetes Secrets from %s namespace", p.podNamespace) //TODO return error onlu for non-repeatable mode
+		}
+		if k8sSecrets.Items == nil {
+			p.log.info("No labeled secret found in %s namespace", p.podNamespace)
+		}
 	}
-	if k8sSecrets.Items == nil {
-		p.log.info("No labeled secret found in %s namespace", p.podNamespace)
-	}
-	//}
 
 	if k8sSecrets.Items != nil {
 		for _, k8sSecret := range k8sSecrets.Items {
@@ -275,7 +285,7 @@ func (p K8sProvider) retrieveRequiredK8sSecret(k8sSecret v1.Secret) error {
 
 	// Read the value of the "conjur-map" entry in the K8s Secret's Data
 	// field, if it exists. If the entry does not exist or has a null
-	// value, return an error.
+	// value, it will be logged.
 	conjurMapKey := config.ConjurMapKey
 	conjurSecretsYAML, conjurMapExists := k8sSecret.Data[conjurMapKey]
 	if !conjurMapExists {
@@ -633,4 +643,37 @@ func (p K8sProvider) createGroupTemplateSecretData(conjurSecrets map[string][]by
 		}
 	}
 	return newSecretsDataMap
+}
+
+// removed all 'k8sSecretName' secret references
+func (p K8sProvider) deleteK8sSecret(k8sSecretName string) {
+
+	p.log.debug("Deleting all %s secret references from cache", k8sSecretName)
+
+	if p.secretsState.updateDestinations != nil {
+		for key, dests := range p.secretsState.updateDestinations {
+			if dests != nil {
+				//array of non-delete destination
+				remaining := make([]updateDestination, 0)
+				for _, dest := range dests {
+					if dest.k8sSecretName != k8sSecretName {
+						remaining = append(remaining, dest)
+					} else {
+						p.log.debug("Deleting %s updateDestinations", dest)
+					}
+				}
+				if len(remaining) > 0 {
+					//update destinations array
+					p.secretsState.updateDestinations[key] = remaining
+				} else {
+					//if non-delete is empty, delete whole record from map
+					delete(p.secretsState.updateDestinations, key)
+				}
+			}
+		}
+	}
+
+	delete(p.secretsGroups, k8sSecretName)
+	delete(p.originalK8sSecrets, k8sSecretName)
+	delete(p.prevSecretsChecksums, k8sSecretName)
 }

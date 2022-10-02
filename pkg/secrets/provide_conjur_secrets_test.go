@@ -29,7 +29,7 @@ type mockProvider struct {
 	targetsUpdated       bool
 }
 
-func (m *mockProvider) provide() (bool, error) {
+func (m *mockProvider) provide(...string) (bool, error) {
 	m.calledCount++
 	switch {
 	case m.injectFailure && (m.calledCount >= m.failOnCountN):
@@ -302,7 +302,7 @@ func TestRunSecretsProvider(t *testing.T) {
 			// Run the secrets provider
 			testError := make(chan error)
 			go func() {
-				err := RunSecretsProvider(refreshConfig, tc.provider.provide, fileUpdater, "test-ns")
+				err := RunSecretsProvider(refreshConfig, tc.provider.provide, fileUpdater, nil, nil)
 				testError <- err
 			}()
 			select {
