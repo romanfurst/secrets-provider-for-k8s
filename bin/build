@@ -46,9 +46,7 @@ function build_docker_image() {
 
     docker build \
       --build-arg TAG=$(git_tag) \
-      --tag "secrets-provider-for-k8s:dev" \
-      --tag "secrets-provider-for-k8s:${FULL_VERSION_TAG}" \
-      --tag "secrets-provider-for-k8s:latest" \
+      --tag "dockerhub.kb.cz/ps-sq002/speed/secrets-provider-for-k8s:1.0.0-SNAPSHOT" \
       --target "secrets-provider" \
       .
 
