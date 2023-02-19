@@ -162,7 +162,13 @@ COPY bin/run-time-scripts /usr/local/bin/
 
 COPY LICENSE.md /licenses
 
+COPY certs/KB_CA.pem /etc/conjur/ssl/KB_CA.pem
+RUN chmod 0775 /etc/conjur/ssl/
+RUN chmod 0644 /etc/conjur/ssl/KB_CA.pem
+
 USER secrets-provider
+
+ENV CONJUR_CERT_FILE=/etc/conjur/ssl/KB_CA.pem
 
 ENTRYPOINT [ "/usr/local/bin/secrets-provider"]
 
