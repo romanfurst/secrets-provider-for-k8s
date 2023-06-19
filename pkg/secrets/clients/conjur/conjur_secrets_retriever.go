@@ -3,6 +3,7 @@ package conjur
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cyberark/conjur-authn-k8s-client/pkg/access_token/memory"
@@ -15,6 +16,8 @@ import (
 	"github.com/cyberark/conjur-opentelemetry-tracer/pkg/trace"
 	"github.com/cyberark/secrets-provider-for-k8s/pkg/log/messages"
 )
+
+var errorRegex = regexp.MustCompile("CONJ00076E Variable .+:.+:(.+) is empty or not found")
 
 // SecretRetriever implements a Retrieve function that is capable of
 // authenticating with Conjur and retrieving multiple Conjur variables
@@ -85,7 +88,22 @@ func retrieveConjurSecrets(accessToken []byte, variableIDs []string) (map[string
 
 	retrievedSecretsByFullIDs, err := conjurClient.RetrieveBatchSecrets(variableIDs)
 	if err != nil {
-		return nil, err
+
+		log.Error(err.Error())
+		//if there is one failed variable in batch request, whole request failed no data is returned.
+		//if batch failed we check the corrupted variableID, remove it from array ant try the batch request again
+		matches := errorRegex.FindStringSubmatch(err.Error())
+		if errorRegex.NumSubexp() > 0 && len(variableIDs) > 1 {
+			log.Debug("Removing failed %s variableID from list and try batch retrieve again", matches[1])
+			for i, v := range variableIDs {
+				if v == matches[1] {
+					variableIDs = append(variableIDs[:i], variableIDs[i+1:]...)
+					break
+				}
+			}
+			return retrieveConjurSecrets(accessToken, variableIDs)
+		}
+		return nil, nil
 	}
 
 	// Normalise secret IDs from batch secrets back to <variable_id>
