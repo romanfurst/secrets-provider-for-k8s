@@ -466,72 +466,7 @@ func (p K8sProvider) updateRequiredK8sSecrets(
 	defer span.End()
 
 	newSecretsDataMap := p.createSecretData(conjurSecrets)
-
-	for k8sSecretName, secretGroups := range p.secretsGroups {
-		//group for k8s secret
-		secretsByGroup := map[string][]*pushtofile.Secret{}
-
-		for _, secretGroup := range secretGroups {
-			for _, secSpec := range secretGroup.SecretSpecs {
-				bValue, ok := conjurSecrets[secSpec.Path]
-				if !ok {
-					p.log.logError("Value for '%s' group alias '%s' not fetched from Conjur", secretGroup.Name, secSpec.Alias)
-					bValue = []byte{}
-				}
-
-				//add retrieved value for group
-				secretsByGroup[secretGroup.Name] = append(
-					secretsByGroup[secretGroup.Name],
-					&pushtofile.Secret{
-						Alias: secSpec.Alias,
-						Value: string(bValue),
-					})
-			}
-		}
-
-		//render every group
-		for groupName, sec := range secretsByGroup {
-
-			secretsMap := map[string]*pushtofile.Secret{}
-			for _, s := range sec {
-				secretsMap[s.Alias] = s
-			}
-
-			tpl, err := template.New(groupName).Funcs(template.FuncMap{
-				// secret is a custom utility function for streamlined access to secret values.
-				// It panics for secrets aliases not specified on the group.
-				"secret": func(alias string) string {
-					v, ok := secretsMap[alias]
-					if ok {
-						return v.Value
-					}
-					p.log.logError("secret alias %q not present in specified secrets for group", alias)
-					return ""
-				},
-			}).Parse(p.originalK8sSecrets[k8sSecretName].Annotations[pushtofile.SecretGroupFileTemplatePrefix+groupName])
-			if err != nil {
-				p.log.logError("Unable to get temaplate for %s group in %s secret: %s", groupName, k8sSecretName, err.Error())
-				continue
-			}
-
-			// Render the secret file content
-			tplData := pushtofile.TemplateData{
-				SecretsArray: sec,
-				SecretsMap:   secretsMap,
-			}
-			fileContent, err := pushtofile.RenderFile(tpl, tplData)
-			if err != nil {
-				p.log.logError("Failed render template for %s group in %s secret: %s", groupName, k8sSecretName, err.Error())
-				continue
-			}
-
-			if newSecretsDataMap[k8sSecretName] == nil {
-				newSecretsDataMap[k8sSecretName] = map[string][]byte{}
-			}
-			//set rendered template into secret with groupName as a key
-			newSecretsDataMap[k8sSecretName][groupName] = fileContent.Bytes()
-		}
-	}
+	newSecretsDataMap = p.createGroupTemplateSecretData(conjurSecrets, newSecretsDataMap)
 
 	// Update K8s Secrets with the retrieved Conjur secrets
 	for k8sSecretName, secretData := range newSecretsDataMap {
@@ -615,5 +550,87 @@ func (p K8sProvider) createSecretData(conjurSecrets map[string][]byte) map[strin
 		//secretValue = []byte{}
 	}
 
+	return newSecretsDataMap
+}
+
+// createGroupTemplateSecretData creates a map of entries to be added to the 'Data' fields
+// of each K8s Secret. Data fields are created from group secret variables and rendered corresponding group template filled with secret values retrieved from Conjur,
+// If a secret has a 'base64' content type, the resulting secret value will be decoded.
+func (p K8sProvider) createGroupTemplateSecretData(conjurSecrets map[string][]byte,
+	newSecretsDataMap map[string]map[string][]byte) map[string]map[string][]byte {
+
+	for k8sSecretName, secretGroups := range p.secretsGroups {
+		//group for k8s secret
+		secretsByGroup := map[string][]*pushtofile.Secret{}
+
+		for _, secretGroup := range secretGroups {
+			for _, secSpec := range secretGroup.SecretSpecs {
+				bValue, ok := conjurSecrets[secSpec.Path]
+				if !ok {
+					p.log.logError("Value for '%s' group alias '%s' not fetched from Conjur", secretGroup.Name, secSpec.Alias)
+					bValue = []byte{}
+				}
+				if ok && secSpec.ContentType == "base64" {
+					decodedSecretValue := make([]byte, base64.StdEncoding.DecodedLen(len(bValue)))
+					_, err := base64.StdEncoding.Decode(decodedSecretValue, bValue)
+					bValue = bytes.Trim(decodedSecretValue, "\x00")
+					if err != nil {
+						p.log.logError("Base64 decoding failed for '%s' group : '%s' alias value", secretGroup.Name, secSpec.Alias)
+					}
+				}
+
+				//add retrieved value for group
+				secretsByGroup[secretGroup.Name] = append(
+					secretsByGroup[secretGroup.Name],
+					&pushtofile.Secret{
+						Alias: secSpec.Alias,
+						Value: string(bValue),
+					})
+			}
+		}
+
+		//render every group
+		for groupName, sec := range secretsByGroup {
+
+			secretsMap := map[string]*pushtofile.Secret{}
+			for _, s := range sec {
+				secretsMap[s.Alias] = s
+			}
+
+			tpl, err := template.New(groupName).Funcs(template.FuncMap{
+				// secret is a custom utility function for streamlined access to secret values.
+				// It panics for secrets aliases not specified on the group.
+				"secret": func(alias string) string {
+					v, ok := secretsMap[alias]
+					if ok {
+						return v.Value
+					}
+					p.log.logError("secret alias %q not present in specified secrets for group", alias)
+					return ""
+				},
+			}).Parse(p.originalK8sSecrets[k8sSecretName].Annotations[pushtofile.SecretGroupFileTemplatePrefix+groupName])
+			if err != nil {
+				p.log.logError("Unable to get temaplate for %s group in %s secret: %s", groupName, k8sSecretName, err.Error())
+				continue
+			}
+
+			// Render the secret file content
+			tplData := pushtofile.TemplateData{
+				SecretsArray: sec,
+				SecretsMap:   secretsMap,
+			}
+			fileContent, err := pushtofile.RenderFile(tpl, tplData)
+			if err != nil {
+				p.log.logError("Failed render template for %s group in %s secret: %s", groupName, k8sSecretName, err.Error())
+				continue
+			}
+
+			if newSecretsDataMap[k8sSecretName] == nil {
+				newSecretsDataMap[k8sSecretName] = map[string][]byte{}
+			}
+			//set rendered template into secret with groupName as a key
+			newSecretsDataMap[k8sSecretName][groupName] = fileContent.Bytes()
+		}
+	}
 	return newSecretsDataMap
 }
