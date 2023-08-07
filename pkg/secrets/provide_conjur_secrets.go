@@ -160,7 +160,6 @@ func RunSecretsProvider(
 	case config.Mode != "sidecar" && config.Mode != "application":
 		// Run once and return if not in sidecar mode
 		return nil
-	case config.SecretRefreshInterval > 0:
 	case config.Mode == "application":
 		log.Info("Refresh interval %s", config.SecretRefreshInterval)
 		// Run periodically if in sidecar mode with periodic refresh
