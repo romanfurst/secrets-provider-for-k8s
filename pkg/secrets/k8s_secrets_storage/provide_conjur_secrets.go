@@ -199,6 +199,72 @@ func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	return updated, nil
 }
 
+func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]byte) {
+	tr := trace.NewOtelTracer(otel.Tracer("secrets-provider"))
+
+	err := p.retrieveRequiredK8sSecret(secret)
+
+	if err != nil {
+		return secret, err, nil
+	}
+
+	spanCtx, span := tr.Start(p.traceContext, "Fetch Conjur Secrets")
+	defer span.End()
+	//retrievedConjurSecrets, _ := p.retrxieveConjurSecrets(tr)
+
+	var variableIDs []string
+
+	updateDests := p.secretsState.updateDestinations
+	if updateDests != nil {
+		for key := range updateDests {
+			variableIDs = append(variableIDs, key)
+		}
+	}
+
+	// ziskama variablesID pro tenhle sekret
+	for _, secretGroup := range p.secretsGroups[secret.Name] {
+		for _, secretSpec := range secretGroup.SecretSpecs {
+			if contains(variableIDs, secretSpec.Path) {
+				continue
+			}
+			variableIDs = append(variableIDs, secretSpec.Path)
+		}
+	}
+
+	if len(variableIDs) == 0 {
+		return secret, nil, nil
+	}
+	//p.log.debug("List of Conjur Secrets to fetch %s", updateDests)
+
+	// vyzvedneme variables z conjuru
+	retrievedConjurSecrets, err := p.conjur.retrieveSecrets(p.podNamespace, variableIDs, spanCtx)
+	if err != nil {
+		log.Error(err.Error())
+		return secret, nil, nil
+	}
+
+	newSecretsDataMap := p.createSecretData(retrievedConjurSecrets)
+	newSecretsDataMap = p.createGroupTemplateSecretData(retrievedConjurSecrets, newSecretsDataMap)
+
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+		log.Debug("Create data entry in %s", secret.Name)
+	}
+	for itemName, secretValue := range newSecretsDataMap[secret.Name] {
+		secret.Data[itemName] = secretValue
+	}
+
+	b := new(bytes.Buffer)
+	_, _ = fmt.Fprintf(b, "%v", secret.Data)
+	checksum, _ := utils.FileChecksum(b)
+	p.prevSecretsChecksums[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)] = checksum
+
+	p.log.info("Secret %s mutated", fmt.Sprintf("%s/%s", secret.Namespace, secret.Name))
+
+	return secret, nil, newSecretsDataMap[fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)]
+
+}
+
 func (p K8sProvider) removeDeletedSecrets(tr trace.Tracer) error {
 	log.Info(messages.CSPFK021I)
 	emptySecrets := make(map[string][]byte)
@@ -459,7 +525,7 @@ func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string][]by
 		return nil, err
 	}
 
-	retrievedConjurSecrets, err := p.conjur.retrieveSecrets(variableIDs, spanCtx)
+	retrievedConjurSecrets, err := p.conjur.retrieveSecrets(p.podNamespace, variableIDs, spanCtx)
 	if err != nil {
 		span.RecordErrorAndSetStatus(err)
 		return nil, p.log.recordedError(messages.CSPFK034E, err.Error())
@@ -470,7 +536,7 @@ func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string][]by
 func (p K8sProvider) updateRequiredK8sSecrets(
 	conjurSecrets map[string][]byte, tracer trace.Tracer) (bool, error) {
 
-	var updated bool
+	var updated = false
 
 	spanCtx, span := tracer.Start(p.traceContext, "Update K8s Secrets")
 	defer span.End()
@@ -676,4 +742,9 @@ func (p K8sProvider) deleteK8sSecret(k8sSecretName string) {
 	delete(p.secretsGroups, k8sSecretName)
 	delete(p.originalK8sSecrets, k8sSecretName)
 	delete(p.prevSecretsChecksums, k8sSecretName)
+}
+
+func (p K8sProvider) CHeckContentHasChanged(groupName string, newChecksum utils.Checksum) bool {
+	return utils.ContentHasChanged(groupName, newChecksum, p.prevSecretsChecksums)
+
 }

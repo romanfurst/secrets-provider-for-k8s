@@ -97,15 +97,17 @@ func retrieveConjurSecrets(accessToken []byte, variableIDs []string) (map[string
 		//if there is one failed variable in batch request, whole request failed no data is returned.
 		//if batch failed we check the corrupted variableID, remove it from array ant try the batch request again
 		matches := errorRegex.FindStringSubmatch(err.Error())
-		if errorRegex.NumSubexp() > 0 && len(variableIDs) > 1 {
-			log.Debug("Removing failed %s variableID from list and try batch retrieve again", matches[1])
-			for i, v := range variableIDs {
-				if v == matches[1] {
-					variableIDs = append(variableIDs[:i], variableIDs[i+1:]...)
-					break
+		if matches != nil {
+			if errorRegex.NumSubexp() > 0 && len(variableIDs) > 1 {
+				log.Debug("Removing failed %s variableID from list and try batch retrieve again", matches[1])
+				for i, v := range variableIDs {
+					if v == matches[1] {
+						variableIDs = append(variableIDs[:i], variableIDs[i+1:]...)
+						break
+					}
 				}
+				return retrieveConjurSecrets(accessToken, variableIDs)
 			}
-			return retrieveConjurSecrets(accessToken, variableIDs)
 		}
 		return nil, nil
 	}

@@ -16,9 +16,15 @@ type RetrieveK8sSecretFunc func(namespace string, secretName string) (*v1.Secret
 type UpdateK8sSecretFunc func(namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte) error
 type RetrieveK8sSecretListFunc func(namespace string) (*v1.SecretList, error)
 
+var kubeClient *kubernetes.Clientset
+
+func init() {
+	kubeClient, _ = configK8sClient()
+}
+
 func RetrieveK8sSecret(namespace string, secretName string) (*v1.Secret, error) {
 	// get K8s client object
-	kubeClient, _ := configK8sClient()
+	//kubeClient, _ := configK8sClient()
 	log.Info(messages.CSPFK005I, secretName, namespace)
 	k8sSecret, err := kubeClient.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
 	if err != nil {
@@ -31,8 +37,6 @@ func RetrieveK8sSecret(namespace string, secretName string) (*v1.Secret, error) 
 }
 
 func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte) error {
-	// get K8s client object
-	kubeClient, _ := configK8sClient()
 
 	if originalK8sSecret.Data == nil {
 		originalK8sSecret.Data = map[string][]byte{}
@@ -44,6 +48,11 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 	}
 
 	log.Info(messages.CSPFK006I, secretName, namespace)
+	//add magic annotation to let mutation webhook know it should ignore this action
+	originalK8sSecret.Annotations["conjur.org/just-provided"] = "true"
+	originalK8sSecret.SetAnnotations(originalK8sSecret.Annotations)
+
+	log.Debug(messages.CSPFK006I, secretName, namespace)
 	_, err := kubeClient.CoreV1().Secrets(namespace).Update(context.Background(), originalK8sSecret, metav1.UpdateOptions{})
 	// Clear secret from memory
 	stringDataEntriesMap = nil
@@ -58,7 +67,6 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 }
 
 func RetrieveK8sSecretList(namespace string) (*v1.SecretList, error) {
-	kubeClient, _ := configK8sClient()
 	log.Info("Retrieving labeled Kubernetes secrets from namespace '%s'", namespace)
 	return kubeClient.CoreV1().Secrets(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "conjur.org/application-mode=true"})
 }
