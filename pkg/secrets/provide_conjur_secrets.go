@@ -2,7 +2,16 @@ package secrets
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"io/ioutil"
+	admission "k8s.io/api/admission/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"net/http"
 	"time"
 
 	"github.com/cenkalti/backoff"
@@ -10,7 +19,6 @@ import (
 
 	"github.com/cyberark/secrets-provider-for-k8s/pkg/log/messages"
 	"github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/clients/conjur"
-	k8sClient "github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/clients/k8s"
 	"github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/config"
 	secretsConfigProvider "github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/config"
 	k8sSecretsStorage "github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/k8s_secrets_storage"
@@ -45,6 +53,8 @@ type ProviderFunc func(secrets ...string) (updated bool, err error)
 // DeleterFunc delete secret contetnt from provider memory when k8s secret is undeployed
 type DeleterFunc func(secrets []string)
 
+type MutateFunc func(v1.Secret) (secret v1.Secret, err error)
+
 // RepeatableProviderFunc describes a function type that is capable of looping
 // indefinitely while providing secrets to unspecified targets.
 type RepeatableProviderFunc func() error
@@ -52,6 +62,21 @@ type RepeatableProviderFunc func() error
 // ProviderFactory defines a function type for creating a ProviderFunc given a
 // RetrieveSecretsFunc and ProviderConfig.
 type ProviderFactory func(traceContent context.Context, secretsRetrieverFunc conjur.RetrieveSecretsFunc, providerConfig ProviderConfig) (ProviderFunc, DeleterFunc, []error)
+
+type WebhookServer struct {
+	server     *http.Server
+	mutateFunc MutateFunc
+}
+
+// Webhook Server parameters
+type ServerParams struct {
+	port           int    // webhook server port
+	certFile       string // path to the x509 certificate for https
+	keyFile        string // path to the x509 private key matching `CertFile`
+	sidecarCfgFile string // path to sidecar injector configuration file
+}
+
+// todo: pryc
 type WatchSecretFunc func(provider ProviderFunc)
 
 // NewProviderForType returns a ProviderFunc responsible for providing secrets in a given mode.
@@ -68,6 +93,18 @@ func NewProviderForType(
 			providerConfig.CommonProviderConfig.SanitizeEnabled,
 			providerConfig.K8sProviderConfig,
 		)
+		whsvr := initWebhookServer(provider.Mutate)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/webhook", whsvr.serve)
+		whsvr.server.Handler = mux
+		go func() {
+			err := whsvr.server.ListenAndServeTLS("", "")
+			//todo eroor handling asynchronni metody
+			if err != nil {
+				log.RecordedError(err.Error())
+			}
+		}()
+		//todo set webserver
 		return provider.Provide, provider.Delete, nil
 	case config.File:
 		provider, err := pushtofile.NewProvider(
@@ -169,13 +206,13 @@ func RunSecretsProvider(
 			periodicQuit:  periodicQuit,
 			periodicError: periodicError,
 		}
-		watcher := k8sClient.K8sSecretWatcher{
+		/*watcher := k8sClient.K8sSecretWatcher{
 			PodNamespace: providerConfig.PodNamespace,
 			AddFunc:      watchAddFunc(provideSecrets, status),
 			UpdateFunc:   watchUpdateFunc(provideSecrets, status),
 			DeleteFunc:   watchDeleteFunc(deleteSecrets),
-		}
-		go periodicSecretProvider(provideSecrets, config, status, watcher.Watch, providerConfig.RequiredK8sSecrets...)
+		}*/
+		go periodicSecretProvider(provideSecrets, config, status /*watcher.Watch,*/, providerConfig.RequiredK8sSecrets...)
 	default:
 		// Run once and sleep forever if in sidecar mode without
 		// periodic refresh (fall through)
@@ -211,11 +248,11 @@ func periodicSecretProvider(
 	provideSecrets ProviderFunc,
 	config periodicConfig,
 	status StatusUpdater,
-	watch k8sClient.WatchK8sSecretFunc,
+	//watch k8sClient.WatchK8sSecretFunc,
 	requiredK8sSecrets ...string,
 ) {
 	if requiredK8sSecrets == nil || len(requiredK8sSecrets) < 1 {
-		watch()
+		//watch()
 	}
 	for {
 		select {
@@ -278,4 +315,113 @@ func watchDeleteFunc(deleter DeleterFunc) func(obj interface{}) {
 			deleter([]string{secretObj.Name})
 		}
 	}
+}
+
+func initWebhookServer(mutateFunc MutateFunc) WebhookServer {
+	var parameters ServerParams
+
+	// get command line parameters
+	flag.IntVar(&parameters.port, "port", 443, "Webhook server port.")
+	flag.StringVar(&parameters.certFile, "tlsCertFile", "/etc/webhook/certs/cert.pem", "File containing the x509 Certificate for HTTPS.")
+	flag.StringVar(&parameters.keyFile, "tlsKeyFile", "/etc/webhook/certs/key.pem", "File containing the x509 private key to --tlsCertFile.")
+	flag.Parse()
+
+	pair, err := tls.LoadX509KeyPair(parameters.certFile, parameters.keyFile)
+	if err != nil {
+		log.Error("Failed to load key pair: %v", err)
+	}
+
+	return WebhookServer{
+		server: &http.Server{
+			Addr:      fmt.Sprintf(":%v", parameters.port),
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{pair}},
+		},
+		mutateFunc: mutateFunc,
+	}
+}
+
+func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
+	body, err := requestBody(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var admissionResponse *admission.AdmissionResponse
+	ar := admission.AdmissionReview{}
+	if _, _, err := serializer.NewCodecFactory(runtime.NewScheme()).UniversalDeserializer().Decode(body, nil, &ar); err != nil {
+		log.Error("Can't decode body: %v", err)
+		admissionResponse = &admission.AdmissionResponse{
+			Result: &metav1.Status{
+				Message: err.Error(),
+			},
+		}
+	} else {
+		admissionResponse = &admission.AdmissionResponse{
+			UID:     ar.Request.UID,
+			Allowed: true,
+		}
+	}
+
+	//v1.Secret
+	var secret v1.Secret
+	if err := json.Unmarshal(ar.Request.Object.Raw, &secret); err != nil {
+		log.Error(err.Error())
+		admissionResponse = errorAdmissionResponse(err.Error())
+		goto response
+	}
+
+	_, err = whsvr.mutateFunc(secret)
+	if err != nil {
+		log.Error(err.Error())
+		admissionResponse = errorAdmissionResponse(err.Error())
+	}
+
+response:
+
+	admissionReview := admission.AdmissionReview{}
+	admissionReview.TypeMeta.Kind = "AdmissionReview"
+	admissionReview.TypeMeta.APIVersion = "admission.k8s.io/v1"
+	if admissionResponse != nil {
+		admissionReview.Response = admissionResponse
+		if ar.Request != nil {
+			admissionReview.Response.UID = ar.Request.UID
+		}
+	}
+	writeResponse(w, admissionReview)
+
+}
+func requestBody(r *http.Request) ([]byte, error) {
+	if r.Body != nil {
+		if data, err := ioutil.ReadAll(r.Body); err == nil {
+			if len(data) == 0 {
+				return nil, fmt.Errorf("empty body")
+			}
+			return data, nil
+		} else {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("request without body")
+}
+
+func writeResponse(w http.ResponseWriter, admissionReview admission.AdmissionReview) {
+	if resp, err := json.Marshal(admissionReview); err != nil {
+		log.Error("Can't encode response to JSON: %v", err)
+		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
+	} else {
+		if _, err := w.Write(resp); err != nil {
+			log.Error("Can't write response: %v", err)
+			http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
+		}
+	}
+}
+
+func errorAdmissionResponse(msg string) *admission.AdmissionResponse {
+	return &admission.AdmissionResponse{
+		Result: &metav1.Status{
+			Message: msg,
+		},
+	}
+
 }
