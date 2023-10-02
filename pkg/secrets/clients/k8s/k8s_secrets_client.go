@@ -2,7 +2,6 @@ package k8s
 
 import (
 	"context"
-
 	"github.com/cyberark/conjur-authn-k8s-client/pkg/log"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,7 +13,7 @@ import (
 
 type RetrieveK8sSecretFunc func(namespace string, secretName string) (*v1.Secret, error)
 type UpdateK8sSecretFunc func(namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte) error
-type RetrieveK8sSecretListFunc func(namespace string) (*v1.SecretList, error)
+type RetrieveK8sSecretListFunc func() (*v1.SecretList, error)
 
 func RetrieveK8sSecret(namespace string, secretName string) (*v1.Secret, error) {
 	// get K8s client object
@@ -39,8 +38,8 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 		log.Debug("Create data entry in %s", secretName)
 	}
 
-	for secretName, secretValue := range stringDataEntriesMap {
-		originalK8sSecret.Data[secretName] = secretValue
+	for secretItemName, secretValue := range stringDataEntriesMap {
+		originalK8sSecret.Data[secretItemName] = secretValue
 	}
 
 	log.Info(messages.CSPFK006I, secretName, namespace)
@@ -57,10 +56,33 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 	return nil
 }
 
-func RetrieveK8sSecretList(namespace string) (*v1.SecretList, error) {
+func RetrieveK8sSecretList() (*v1.SecretList, error) {
 	kubeClient, _ := configK8sClient()
-	log.Info("Retrieving labeled Kubernetes secrets from namespace '%s'", namespace)
-	return kubeClient.CoreV1().Secrets(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "conjur.org/application-mode=true"})
+	log.Info("Retrieving labeled Kubernetes secrets from all namespaces")
+	nsList, err := kubeClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	resultSecretList := &v1.SecretList{}
+	for _, ns := range nsList.Items {
+		secretList, err := kubeClient.CoreV1().Secrets(ns.Name).List(context.Background(), metav1.ListOptions{LabelSelector: "conjur.org/application-mode=true"})
+		if err != nil {
+			log.Error("Error while getting secrets from namespace %s: %s", ns.Namespace, err.Error())
+			continue
+		}
+		if secretList != nil {
+			logSecrets := func() []string {
+				var nameList []string
+				for _, sec := range secretList.Items {
+					nameList = append(nameList, sec.Name)
+				}
+				return nameList
+			}
+			log.Debug("Labeled secrets found in %s ns: %s", ns.Name, logSecrets())
+			resultSecretList.Items = append(resultSecretList.Items, secretList.Items...)
+		}
+	}
+	return resultSecretList, nil
 }
 
 func configK8sClient() (*kubernetes.Clientset, error) {

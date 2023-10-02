@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	admission "k8s.io/api/admission/v1"
@@ -98,13 +97,13 @@ func NewProviderForType(
 		mux.HandleFunc("/webhook", whsvr.serve)
 		whsvr.server.Handler = mux
 		go func() {
+			log.Debug("Starting admission webhook server...")
 			err := whsvr.server.ListenAndServeTLS("", "")
 			//todo eroor handling asynchronni metody
 			if err != nil {
 				log.RecordedError(err.Error())
 			}
 		}()
-		//todo set webserver
 		return provider.Provide, provider.Delete, nil
 	case config.File:
 		provider, err := pushtofile.NewProvider(
@@ -318,22 +317,15 @@ func watchDeleteFunc(deleter DeleterFunc) func(obj interface{}) {
 }
 
 func initWebhookServer(mutateFunc MutateFunc) WebhookServer {
-	var parameters ServerParams
 
-	// get command line parameters
-	flag.IntVar(&parameters.port, "port", 443, "Webhook server port.")
-	flag.StringVar(&parameters.certFile, "tlsCertFile", "/etc/webhook/certs/cert.pem", "File containing the x509 Certificate for HTTPS.")
-	flag.StringVar(&parameters.keyFile, "tlsKeyFile", "/etc/webhook/certs/key.pem", "File containing the x509 private key to --tlsCertFile.")
-	flag.Parse()
-
-	pair, err := tls.LoadX509KeyPair(parameters.certFile, parameters.keyFile)
+	pair, err := tls.LoadX509KeyPair("/etc/webhook/certs/cert.pem", "/etc/webhook/certs/key.pem")
 	if err != nil {
 		log.Error("Failed to load key pair: %v", err)
 	}
 
 	return WebhookServer{
 		server: &http.Server{
-			Addr:      fmt.Sprintf(":%v", parameters.port),
+			Addr:      fmt.Sprintf(":%v", 5000),
 			TLSConfig: &tls.Config{Certificates: []tls.Certificate{pair}},
 		},
 		mutateFunc: mutateFunc,
@@ -365,6 +357,11 @@ func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
 
 	//v1.Secret
 	var secret v1.Secret
+	//smazat z cache
+	if ar.Request.Operation == admission.Delete {
+		//todo handle delete event
+		goto response
+	}
 	if err := json.Unmarshal(ar.Request.Object.Raw, &secret); err != nil {
 		log.Error(err.Error())
 		admissionResponse = errorAdmissionResponse(err.Error())

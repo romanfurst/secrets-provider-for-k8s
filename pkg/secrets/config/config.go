@@ -240,10 +240,12 @@ func NewConfig(settings map[string]string) *Config {
 			k8sSecretsStr := strings.ReplaceAll(k8sSecretsStr, "- ", "")
 			k8sSecretsArr = strings.Split(k8sSecretsStr, "\n")
 			k8sSecretsArr = k8sSecretsArr[:len(k8sSecretsArr)-1]
+			//TODO ns/name
 		} else {
 			k8sSecretsStr = settings["K8S_SECRETS"]
 			k8sSecretsStr = strings.ReplaceAll(k8sSecretsStr, " ", "")
 			k8sSecretsArr = strings.Split(k8sSecretsStr, ",")
+			//TODO ns/name
 		}
 		k8sSecretsArr = removeEmptyStrings(k8sSecretsArr)
 	}
