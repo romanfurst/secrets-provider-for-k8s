@@ -399,7 +399,7 @@ func (p K8sProvider) refreshUpdateDestinations(conjurMap map[string]interface{},
 // If not already exists, append new destination to list
 func appendDestination(dests []updateDestination, dest updateDestination) []updateDestination {
 	for _, destt := range dests {
-		if destt.k8sSecretName == dest.k8sSecretName && destt.k8sSecretName == dest.k8sSecretName {
+		if destt.k8sSecretName == dest.k8sSecretName && destt.secretName == dest.secretName {
 			return dests
 		}
 	}
