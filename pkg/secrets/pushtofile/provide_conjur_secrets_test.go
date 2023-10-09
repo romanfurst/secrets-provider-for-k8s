@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func retrieve(variableIDs []string, ctx context.Context) (map[string][]byte, error) {
+func retrieve(auth string, variableIDs []string, ctx context.Context) (map[string][]byte, error) {
 	masterMap := make(map[string][]byte)
 	for _, id := range variableIDs {
 		masterMap[id] = []byte(fmt.Sprintf("value-%s", id))
@@ -18,11 +18,11 @@ func retrieve(variableIDs []string, ctx context.Context) (map[string][]byte, err
 	return masterMap, nil
 }
 
-func retrieveWith403(variableIDs []string, ctx context.Context) (map[string][]byte, error) {
+func retrieveWith403(authn string, variableIDs []string, ctx context.Context) (map[string][]byte, error) {
 	return nil, fmt.Errorf("403")
 }
 
-func retrieveWithGenericError(variableIDs []string, ctx context.Context) (map[string][]byte, error) {
+func retrieveWithGenericError(auth string, variableIDs []string, ctx context.Context) (map[string][]byte, error) {
 	return nil, fmt.Errorf("generic error")
 }
 

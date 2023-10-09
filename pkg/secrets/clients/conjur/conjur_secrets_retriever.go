@@ -23,39 +23,65 @@ var errorRegex = regexp.MustCompile("CONJ00076E Variable .+:.+:(.+) is empty or 
 // authenticating with Conjur and retrieving multiple Conjur variables
 // in bulk.
 type secretRetriever struct {
-	authn authenticator.Authenticator
+	authnMap    map[string]authenticator.Authenticator
+	authnConfig config.Configuration
+	//authn authenticator.Authenticator
 }
 
 // RetrieveSecretsFunc defines a function type for retrieving secrets.
-type RetrieveSecretsFunc func(variableIDs []string, traceContext context.Context) (map[string][]byte, error)
+type RetrieveSecretsFunc func(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error)
 
 // RetrieverFactory defines a function type for creating a RetrieveSecretsFunc
 // implementation given an authenticator config.
 type RetrieverFactory func(authnConfig config.Configuration) (RetrieveSecretsFunc, error)
 
+type AddAuthnFunc func(auth string) (authenticator.Authenticator, error)
+
 // NewSecretRetriever creates a new SecretRetriever and Authenticator
 // given an authenticator config.
 func NewSecretRetriever(authnConfig config.Configuration) (RetrieveSecretsFunc, error) {
+	/*accessToken, err := memory.NewAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("%s", messages.CSPFK001E)
+	}*/
+
+	/*authn, err := authenticator.NewAuthenticatorWithAccessToken(authnConfig, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("%s", messages.CSPFK009E)
+	}*/
+
+	return secretRetriever{
+		authnMap:    make(map[string]authenticator.Authenticator),
+		authnConfig: authnConfig,
+	}.Retrieve, nil
+}
+
+func (retriever secretRetriever) AddAuthn(auth string) (authenticator.Authenticator, error) {
 	accessToken, err := memory.NewAccessToken()
 	if err != nil {
 		return nil, fmt.Errorf("%s", messages.CSPFK001E)
 	}
-
-	authn, err := authenticator.NewAuthenticatorWithAccessToken(authnConfig, accessToken)
+	authn, err := authenticator.NewAuthenticatorWithAccessToken(retriever.authnConfig, accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("%s", messages.CSPFK009E)
 	}
-
-	return secretRetriever{
-		authn: authn,
-	}.Retrieve, nil
+	retriever.authnMap[auth] = authn
+	return authn, nil
 }
 
 // Retrieve implements a RetrieveSecretsFunc for a given SecretRetriever.
 // Authenticates the client, and retrieves a given batch of variables from Conjur.
-func (retriever secretRetriever) Retrieve(variableIDs []string, traceContext context.Context) (map[string][]byte, error) {
+func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error) {
 
-	authn := retriever.authn
+	authn := retriever.authnMap[auth]
+	if authn == nil {
+		var err error
+		authn, err = retriever.AddAuthn(auth)
+		if err != nil {
+			log.Error("Cannot get authenticator for %s.", auth)
+			return nil, err
+		}
+	}
 
 	err := authn.AuthenticateWithContext(traceContext)
 	if err != nil {
