@@ -29,7 +29,7 @@ func FetchSecretsForGroups(
 	secretsByGroup := map[string][]*Secret{}
 
 	secretPaths := getAllPaths(secretGroups)
-	secretValueById, err := depRetrieveSecrets(secretPaths, traceContext)
+	secretValueById, err := depRetrieveSecrets("", secretPaths, traceContext)
 	if err != nil {
 		return nil, err
 	}

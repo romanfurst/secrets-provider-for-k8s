@@ -13,13 +13,21 @@ batch secrets retrieval so we expose only this method of the client.
 
 The name ConjurClient also improves readability as Client can be ambiguous.
 */
+
+var cliensMap map[string]*conjurapi.Client
+
+func init() {
+	cliensMap = make(map[string]*conjurapi.Client)
+}
+
 type ConjurClient interface {
 	RetrieveBatchSecretsSafe([]string) (map[string][]byte, error)
 }
 
-func NewConjurClient(tokenData []byte) (ConjurClient, error) {
-	log.Info(messages.CSPFK002I)
+func NewConjurClient(auth string, tokenData []byte) (ConjurClient, error) {
+	log.Debug(messages.CSPFK002I)
 	config, err := conjurapi.LoadConfig()
+	//config.U
 	if err != nil {
 		return nil, log.RecordedError(messages.CSPFK031E, err.Error())
 	}
