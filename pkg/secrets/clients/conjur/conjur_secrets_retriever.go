@@ -150,7 +150,7 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 	retrievedSecretsByFullIDs, err := conjurClient.RetrieveBatchSecretsSafe(variableIDs)
 	if err != nil {
 
-		log.Error("Error while retrieving batch variableIDs %s : %s", variableIDs, err.Error())
+		log.Debug("Error while retrieving batch variableIDs %s : %s", variableIDs, err.Error())
 		log.Debug("Client for %s auth with %s token", auth, accessToken)
 		//if there is one failed variable in batch request, whole request failed no data is returned.
 		//if batch failed we check the corrupted variableID, remove it from array ant try the batch request again
@@ -160,6 +160,7 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 				log.Debug("Removing failed %s variableID from list and try batch retrieve again", matches[1])
 				for i, v := range variableIDs {
 					if v == matches[1] {
+						log.Warn("Variable %s has not been retrieved from Conjiur: %s", v, err.Error())
 						variableIDs = append(variableIDs[:i], variableIDs[i+1:]...)
 						break
 					}

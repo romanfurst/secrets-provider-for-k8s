@@ -807,7 +807,7 @@ func (p K8sProvider) createGroupTemplateSecretData(authn string, conjurSecrets m
 						})
 				}
 				if secretValuesNotProvider != "" {
-					p.log.logError("In '%s' secret following template variables was not provided because its values was not fetched from Conjur: %s", k8sSecretFullName, secretValuesNotProvider)
+					p.log.warn("In '%s' secret following template variables was not provided because its values was not fetched from Conjur: %s", k8sSecretFullName, secretValuesNotProvider)
 				}
 			}
 
@@ -827,7 +827,7 @@ func (p K8sProvider) createGroupTemplateSecretData(authn string, conjurSecrets m
 						if ok {
 							return v.Value
 						}
-						p.log.logError("secret alias %q not present in specified secrets for group", alias)
+						p.log.warn("secret alias %q not present in specified secrets for group", alias)
 						return ""
 					},
 				}).Parse(p.originalK8sSecrets[k8sSecretFullName].Annotations[pushtofile.SecretGroupFileTemplatePrefix+groupName])
