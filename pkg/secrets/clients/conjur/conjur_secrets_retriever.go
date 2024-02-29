@@ -147,6 +147,37 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 		return nil, log.RecordedError(messages.CSPFK033E)
 	}
 
+	//if variableIDs array is too large, batch request may end up with nginx error response "414 Request-URI Too Large"
+	//in that case lets split the array and make more independent batch calls
+	err = nil
+	maxVariablesIDsArraySize := 40
+	if len(variableIDs) > maxVariablesIDsArraySize {
+		log.Info("Too many variableIDs  to retrieve. Several batch calls will be made")
+
+		var resultRetrievedSecrets = map[string][]byte{}
+
+		// go through array divided by maxVaribalesIDsArraySize
+		var j int
+		for i := 0; i < len(variableIDs); i += maxVariablesIDsArraySize {
+			j += maxVariablesIDsArraySize
+			if j > len(variableIDs) {
+				j = len(variableIDs)
+			}
+
+			//now variableIDs[i:j] is actual  sub-array (chunk)
+			log.Debug("Actual variableIDs sub-array indexes %d-%d", i, j)
+			if chunkRetrievedSecrets, _ := retrieveConjurSecrets(auth, accessToken, variableIDs[i:j]); chunkRetrievedSecrets != nil {
+				//add actuals rettrieved chunks secrets to the result map
+				for k, v := range chunkRetrievedSecrets {
+					resultRetrievedSecrets[k] = v
+				}
+			}
+		}
+
+		//return joined result
+		return resultRetrievedSecrets, nil
+	}
+
 	retrievedSecretsByFullIDs, err := conjurClient.RetrieveBatchSecretsSafe(variableIDs)
 	if err != nil {
 
