@@ -266,6 +266,13 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 	}
 	authn = strings.TrimSpace(strings.ToUpper(authn))
 
+	//only system components can reach k8s infra safes
+	//k8s infra safes are available under 'k8s-system' authenticator
+	if authn == "K8S-SYSTEM" && !strings.HasSuffix(secret.Namespace, "-system") {
+		log.Warn(fmt.Sprintf("Secret %s in %s namespace will not be provided", secret.Name, secret.Namespace))
+		return secret, errors.New(fmt.Sprintf("Infra K8s safes with 'k8s-system' Conjur authenticator can be accessed only from *-system namespaces")), nil
+	}
+
 	//full name consists of 'ns/name' pattern
 	fullK8sSecretName := fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)
 
@@ -428,6 +435,14 @@ func (p K8sProvider) retrieveRequiredK8sSecret(k8sSecret v1.Secret) error {
 		return nil
 	}
 	authn = strings.TrimSpace(strings.ToUpper(authn))
+
+	//only system components can reach k8s infra safes
+	//k8s infra safes are available under 'k8s-system' authenticator
+	if authn == "K8S-SYSTEM" && !strings.HasSuffix(k8sSecret.Namespace, "-system") {
+		log.Warn(fmt.Sprintf("Secret %s in %s namespace will not be provided. Infra K8s safes with 'k8s-system' Conjur authenticator can be accesed only from *-system namespaces", k8sSecret.Name, k8sSecret.Namespace))
+		p.log.logError("Infra K8s safes with 'k8s-system' Conjur authenticator can be accessed only from *-system namespaces")
+		return nil
+	}
 
 	k8sSecretWrapper := k8sSecretWrapper{
 		fullName:   fmt.Sprintf("%s/%s", k8sSecret.Namespace, k8sSecret.Name),
