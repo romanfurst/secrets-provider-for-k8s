@@ -170,6 +170,7 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 				//add actuals rettrieved chunks secrets to the result map
 				for k, v := range chunkRetrievedSecrets {
 					resultRetrievedSecrets[k] = v
+					log.Debug("Retrieved account: %s = %s", k, v)
 				}
 			}
 		}
