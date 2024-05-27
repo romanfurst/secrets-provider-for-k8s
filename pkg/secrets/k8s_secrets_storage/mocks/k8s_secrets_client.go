@@ -88,7 +88,8 @@ func (c *KubeSecretsClient) RetrieveSecret(_ string, secretName string) (*v1.Sec
 func (c *KubeSecretsClient) UpdateSecret(
 	_ string, secretName string,
 	originalK8sSecret *v1.Secret,
-	stringDataEntriesMap map[string][]byte) error {
+	stringDataEntriesMap map[string][]byte,
+	variablesErrorsMap ...map[string]string) error {
 
 	if c.ErrOnUpdate != nil {
 		return c.ErrOnUpdate

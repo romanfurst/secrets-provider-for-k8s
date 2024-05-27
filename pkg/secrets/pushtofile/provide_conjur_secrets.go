@@ -81,7 +81,7 @@ func provideWithDeps(
 	tr := trace.NewOtelTracer(otel.Tracer("secrets-provider"))
 	spanCtx, span := tr.Start(traceContext, "Fetch Conjur Secrets")
 	var updated bool
-	secretsByGroup, err := FetchSecretsForGroups(depFuncs.retrieveSecretsFunc, groups, spanCtx)
+	secretsByGroup, err, _ := FetchSecretsForGroups(depFuncs.retrieveSecretsFunc, groups, spanCtx)
 	if err != nil {
 		// Delete secret files for variables that no longer exist or the user no longer has permissions to.
 		// In the future we'll delete only the secrets that are revoked, but for now we delete all secrets in

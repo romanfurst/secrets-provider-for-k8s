@@ -32,7 +32,7 @@ type secretRetriever struct {
 }
 
 // RetrieveSecretsFunc defines a function type for retrieving secrets.
-type RetrieveSecretsFunc func(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error)
+type RetrieveSecretsFunc func(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error, map[string]string)
 
 // RetrieverFactory defines a function type for creating a RetrieveSecretsFunc
 // implementation given an authenticator config.
@@ -98,7 +98,9 @@ func (retriever secretRetriever) GetAuthenticatorForAuthn(auth string) (authenti
 
 // Retrieve implements a RetrieveSecretsFunc for a given SecretRetriever.
 // Authenticates the client, and retrieves a given batch of variables from Conjur.
-func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error) {
+// return map of retrieved values where key is variableID
+// return map of provided errors where key is variableID
+func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, traceContext context.Context) (map[string][]byte, error, map[string]string) {
 
 	lock.Lock()
 	defer lock.Unlock()
@@ -107,7 +109,7 @@ func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, tra
 	authn, err := retriever.GetAuthenticatorForAuthn(auth)
 	if err != nil {
 		log.Error("Cannot get authenticator for %s.", auth)
-		return nil, err
+		return nil, err, nil
 	}
 
 	err = authn.AuthenticateWithContext(traceContext)
@@ -116,12 +118,12 @@ func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, tra
 		err = authn.AuthenticateWithContext(traceContext)
 	}
 	if err != nil {
-		return nil, log.RecordedError("%s for %s authenticator", messages.CSPFK010E, auth)
+		return nil, log.RecordedError("%s for %s authenticator", messages.CSPFK010E, auth), nil
 	}
 
 	accessTokenData, err := authn.GetAccessToken().Read()
 	if err != nil {
-		return nil, log.RecordedError("%s for %s authenticator", messages.CSPFK002E, auth)
+		return nil, log.RecordedError("%s for %s authenticator", messages.CSPFK002E, auth), nil
 	}
 	// Always delete the access token. The deletion is idempotent and never fails
 	defer authn.GetAccessToken().Delete()
@@ -134,17 +136,20 @@ func (retriever secretRetriever) Retrieve(auth string, variableIDs []string, tra
 	return retrieveConjurSecrets(auth, accessTokenData, variableIDs)
 }
 
-func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string) (map[string][]byte, error) {
+func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string) (map[string][]byte, error, map[string]string) {
 	log.Debug(messages.CSPFK003I, variableIDs)
+
+	//prepare map for proved errors. The keys is variableID the values os error message
+	var variableErrors = map[string]string{}
 
 	if len(variableIDs) == 0 {
 		log.Info(messages.CSPFK016I)
-		return nil, nil
+		return nil, nil, variableErrors
 	}
 
 	conjurClient, err := NewConjurClient(auth, accessToken)
 	if err != nil {
-		return nil, log.RecordedError(messages.CSPFK033E)
+		return nil, log.RecordedError(messages.CSPFK033E), variableErrors
 	}
 
 	//if variableIDs array is too large, batch request may end up with nginx error response "414 Request-URI Too Large"
@@ -166,17 +171,20 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 
 			//now variableIDs[i:j] is actual  sub-array (chunk)
 			log.Debug("Actual variableIDs sub-array indexes %d-%d", i, j)
-			if chunkRetrievedSecrets, _ := retrieveConjurSecrets(auth, accessToken, variableIDs[i:j]); chunkRetrievedSecrets != nil {
+			if chunkRetrievedSecrets, _, chunkVariableErrors := retrieveConjurSecrets(auth, accessToken, variableIDs[i:j]); chunkRetrievedSecrets != nil {
 				//add actuals rettrieved chunks secrets to the result map
 				for k, v := range chunkRetrievedSecrets {
 					resultRetrievedSecrets[k] = v
 					log.Debug("Retrieved account: %s = %s", k, v)
 				}
+				for k, v := range chunkVariableErrors {
+					variableErrors[k] = v
+				}
 			}
 		}
 
 		//return joined result
-		return resultRetrievedSecrets, nil
+		return resultRetrievedSecrets, nil, variableErrors
 	}
 
 	retrievedSecretsByFullIDs, err := conjurClient.RetrieveBatchSecretsSafe(variableIDs)
@@ -192,15 +200,21 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 				log.Debug("Removing failed %s variableID from list and try batch retrieve again", matches[1])
 				for i, v := range variableIDs {
 					if v == matches[1] {
-						log.Warn("Variable %s has not been retrieved from Conjiur: %s", v, err.Error())
+						log.Warn("Variable %s has not been retrieved from Conjur: %s", v, err.Error())
 						variableIDs = append(variableIDs[:i], variableIDs[i+1:]...)
+						variableErrors[v] = err.Error()
+						log.Warn("variable errors set: %s", variableErrors)
 						break
 					}
 				}
-				return retrieveConjurSecrets(auth, accessToken, variableIDs)
+				recursiveRetrievedSecrets, recursiveError, recursiveVariableErrors := retrieveConjurSecrets(auth, accessToken, variableIDs)
+				for k, v := range variableErrors {
+					recursiveVariableErrors[k] = v
+				}
+				return recursiveRetrievedSecrets, recursiveError, recursiveVariableErrors
 			}
 		}
-		return nil, nil
+		return nil, nil, variableErrors
 	}
 
 	// Normalise secret IDs from batch secrets back to <variable_id>
@@ -209,8 +223,7 @@ func retrieveConjurSecrets(auth string, accessToken []byte, variableIDs []string
 		retrievedSecrets[normaliseVariableId(id)] = secret
 		delete(retrievedSecretsByFullIDs, id)
 	}
-
-	return retrievedSecrets, nil
+	return retrievedSecrets, nil, variableErrors
 }
 
 // The variable ID can be in the format "<account>:variable:<variable_id>". This function

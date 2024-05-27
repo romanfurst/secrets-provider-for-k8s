@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/cyberark/secrets-provider-for-k8s/pkg/secrets/annotations"
 	"io/ioutil"
 	admission "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,7 +53,7 @@ type ProviderFunc func(secrets ...string) (updated bool, err error)
 // DeleterFunc delete secret contetnt from provider memory when k8s secret is undeployed
 type DeleterFunc func(secrets []string)
 
-type MutateFunc func(v1.Secret) (secret v1.Secret, err error, patchData map[string][]byte)
+type MutateFunc func(v1.Secret) (secret v1.Secret, err error, patchData map[string][]byte, variblesErrorMsg string)
 
 // RepeatableProviderFunc describes a function type that is capable of looping
 // indefinitely while providing secrets to unspecified targets.
@@ -312,6 +313,8 @@ func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
 
 	var secret v1.Secret
 	var patchData map[string][]byte
+	var variableErrorsMsg string
+	patchOp := "add"
 	if ar.Request.Operation == admission.Delete {
 		log.Debug("Deleting from cache %s", fmt.Sprintf("%s/%s", ar.Request.Namespace, ar.Request.Name))
 		whsvr.provider.Delete([]string{fmt.Sprintf("%s/%s", ar.Request.Namespace, ar.Request.Name)})
@@ -340,11 +343,20 @@ func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err, patchData = whsvr.provider.Mutate(secret)
+	secret, err, patchData, variableErrorsMsg = whsvr.provider.Mutate(secret)
 	if err != nil {
 		log.Error(err.Error())
+		patchOp = "add"
+		if secret.Annotations[annotations.LastProvidedErrors] != "" {
+			patchOp = "replace"
+		}
+		patch = append(patch, patchOperation{
+			Op:    patchOp,
+			Path:  "/metadata/annotations/" + annotations.LastProvidedErrors,
+			Value: err.Error(),
+		})
 		admissionReview.Response.Result.Message = err.Error()
-		return
+		goto response
 	}
 
 	log.Debug("%s", patchData)
@@ -352,11 +364,32 @@ func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
 	for itemName, secretValue := range patchData {
 		patchSecretData[itemName] = string(secretValue)
 	}
+	patchOp = "add"
+	if secret.StringData != nil {
+		patchOp = "replace"
+	}
 	patch = append(patch, patchOperation{
-		Op:    "add",
+		Op:    patchOp,
 		Path:  "/stringData",
 		Value: patchSecretData,
 	})
+	if variableErrorsMsg != "" {
+		patchOp = "add"
+		if secret.Annotations[annotations.LastProvidedErrors] != "" {
+			patchOp = "replace"
+		}
+		patch = append(patch, patchOperation{
+			Op:    patchOp,
+			Path:  "/metadata/annotations/" + annotations.LastProvidedErrors,
+			Value: variableErrorsMsg,
+		})
+
+	} else if secret.Annotations[annotations.LastProvidedErrors] != "" {
+		patch = append(patch, patchOperation{
+			Op:   "remove",
+			Path: "/metadata/annotations/" + annotations.LastProvidedErrors,
+		})
+	}
 
 response:
 	admissionReview.Response.PatchType = &muatatePatchType

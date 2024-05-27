@@ -24,14 +24,14 @@ func FetchSecretsForGroups(
 	depRetrieveSecrets conjur.RetrieveSecretsFunc,
 	secretGroups []*SecretGroup,
 	traceContext context.Context,
-) (map[string][]*Secret, error) {
+) (map[string][]*Secret, error, map[string]string) {
 	var err error
 	secretsByGroup := map[string][]*Secret{}
 
 	secretPaths := getAllPaths(secretGroups)
-	secretValueById, err := depRetrieveSecrets("", secretPaths, traceContext)
+	secretValueById, err, variableErrors := depRetrieveSecrets("", secretPaths, traceContext)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 
 	for _, group := range secretGroups {
@@ -42,7 +42,7 @@ func FetchSecretsForGroups(
 					"secret with alias %q not present in fetched secrets",
 					spec.Alias,
 				)
-				return nil, err
+				return nil, err, variableErrors
 			}
 			if spec.ContentType == "base64" {
 				decodedSecretValue := make([]byte, base64.StdEncoding.DecodedLen(len(sValue)))
@@ -67,7 +67,7 @@ func FetchSecretsForGroups(
 		}
 	}
 
-	return secretsByGroup, err
+	return secretsByGroup, err, variableErrors
 }
 
 // secretPathSet is a mathematical set of secret paths. The values of the

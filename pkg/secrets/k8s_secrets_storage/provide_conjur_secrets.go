@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -189,7 +190,7 @@ func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	}
 	// Retrieve Conjur secrets for all K8s Secrets.
 	var updated bool
-	retrievedConjurSecrets, err := p.retrieveConjurSecrets(tr)
+	retrievedConjurSecrets, err, variableErrors := p.retrieveConjurSecrets(tr)
 	if err != nil {
 		// Delete K8s secrets for Conjur variables that no longer exist or the user no longer has permissions to.
 		// In the future we'll delete only the secrets that are revoked, but for now we delete all secrets in
@@ -211,7 +212,7 @@ func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	}
 
 	// Update all K8s Secrets with the retrieved Conjur secrets.
-	updated, err = p.updateRequiredK8sSecrets(retrievedConjurSecrets, tr)
+	updated, err = p.updateRequiredK8sSecrets(retrievedConjurSecrets, variableErrors, tr)
 	if err != nil {
 		return updated, p.log.recordedError(messages.CSPFK023E)
 	}
@@ -222,7 +223,7 @@ func (p K8sProvider) Provide(secrets ...string) (bool, error) {
 	return updated, nil
 }
 
-func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]byte) {
+func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]byte, string) {
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -238,7 +239,7 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 	err := p.retrieveRequiredK8sSecret(secret)
 
 	if err != nil {
-		return secret, err, nil
+		return secret, err, nil, ""
 	}
 
 	spanCtx, span := tr.Start(p.traceContext, "Fetch Conjur Secrets")
@@ -262,7 +263,7 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 		authn = secret.Labels["applicationId"]
 	}
 	if authn == "" {
-		return secret, errors.New(fmt.Sprintf("Secret '%s/%s' doesn't contain neither '%s' nor '%s' label.", secret.Namespace, secret.Name, "applicationId", "conjur.org/auth-id")), nil
+		return secret, errors.New(fmt.Sprintf("Secret '%s/%s' doesn't contain neither '%s' nor '%s' label.", secret.Namespace, secret.Name, "applicationId", "conjur.org/auth-id")), nil, ""
 	}
 	authn = strings.TrimSpace(strings.ToUpper(authn))
 
@@ -270,7 +271,7 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 	//k8s infra safes are available under 'k8s-system' authenticator
 	if authn == "K8S-SYSTEM" && !strings.HasSuffix(secret.Namespace, "-system") {
 		log.Warn(fmt.Sprintf("Secret %s in %s namespace will not be provided", secret.Name, secret.Namespace))
-		return secret, errors.New(fmt.Sprintf("Infra K8s safes with 'k8s-system' Conjur authenticator can be accessed only from *-system namespaces")), nil
+		return secret, errors.New(fmt.Sprintf("Infra K8s safes with 'k8s-system' Conjur authenticator can be accessed only from *-system namespaces")), nil, ""
 	}
 
 	//full name consists of 'ns/name' pattern
@@ -292,16 +293,15 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 	}
 
 	if len(variableIDs) == 0 {
-		return secret, nil, nil
+		return secret, nil, nil, ""
 	}
 	//p.log.debug("List of Conjur Secrets to fetch %s", updateDests)
 
 	// vyzvedneme variables z conjuru
-	retrievedConjurSecrets, err := p.conjur.retrieveSecrets(authn, variableIDs, spanCtx)
+	retrievedConjurSecrets, err, variableErrors := p.conjur.retrieveSecrets(authn, variableIDs, spanCtx)
 	if err != nil {
 		log.Error("Secret '%s/%s' not mutated. Error: %s", secret.Namespace, secret.Name, err.Error())
-		//todo erro do anotace?
-		return secret, nil, nil
+		return secret, nil, nil, err.Error()
 	}
 
 	newSecretsDataMap := p.createSecretData(retrievedConjurSecrets)
@@ -334,7 +334,15 @@ func (p K8sProvider) Mutate(secret v1.Secret) (v1.Secret, error, map[string][]by
 
 	p.log.info("Secret %s mutated", fullK8sSecretName)
 
-	return secret, nil, newSecretsDataMap[fullK8sSecretName]
+	errMsg := ""
+	//join all variables error into on string
+	if len(variableErrors) > 0 {
+		if errMsgJson, e := json.Marshal(variableErrors); e == nil {
+			errMsg = string(errMsgJson)
+		}
+	}
+
+	return secret, nil, newSecretsDataMap[fullK8sSecretName], errMsg
 
 }
 
@@ -351,7 +359,7 @@ func (p K8sProvider) removeDeletedSecrets(tr trace.Tracer) error {
 		for _, secret := range variablesToDelete {
 			emptySecrets[auth][secret] = []byte("")
 		}
-		_, err = p.updateRequiredK8sSecrets(emptySecrets, tr)
+		_, err = p.updateRequiredK8sSecrets(emptySecrets, make(map[string]map[string]string), tr)
 		if err != nil {
 			continue
 			//return err
@@ -643,7 +651,7 @@ func contains(elems []string, v string) bool {
 	return false
 }
 
-func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string]map[string][]byte, error) {
+func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string]map[string][]byte, error, map[string]map[string]string) {
 
 	retrieveSecretLock.Lock()
 	defer retrieveSecretLock.Unlock()
@@ -653,12 +661,14 @@ func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string]map[
 
 	variableIDsAuthnMap, err := p.listConjurSecretsToFetch()
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 
 	result := make(map[string]map[string][]byte)
+	variableErrors := make(map[string]map[string]string)
 	for authn, variableIDs := range variableIDsAuthnMap {
-		retrievedConjurSecrets, err := p.conjur.retrieveSecrets(authn, variableIDs, spanCtx)
+		retrievedConjurSecrets, err, retrievedErrors := p.conjur.retrieveSecrets(authn, variableIDs, spanCtx)
+		variableErrors[authn] = retrievedErrors
 		if err != nil {
 			//span.RecordErrorAndSetStatus(err)
 			//return nil, p.log.recordedError(messages.CSPFK034E, err.Error())
@@ -668,11 +678,11 @@ func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string]map[
 			result[authn] = retrievedConjurSecrets
 		}
 	}
-	return result, nil
+	return result, nil, variableErrors
 }
 
 func (p K8sProvider) updateRequiredK8sSecrets(
-	conjurSecretsFotAuthnMap map[string]map[string][]byte, tracer trace.Tracer) (bool, error) {
+	conjurSecretsFotAuthnMap map[string]map[string][]byte, variableErrorsAuthnMap map[string]map[string]string, tracer trace.Tracer) (bool, error) {
 
 	updateSecretLock.Lock()
 	defer updateSecretLock.Unlock()
@@ -686,6 +696,24 @@ func (p K8sProvider) updateRequiredK8sSecrets(
 
 		newSecretsDataMap := p.createSecretData(conjurSecrets)
 		newSecretsDataMap = p.createGroupTemplateSecretData(authn, conjurSecrets, newSecretsDataMap)
+
+		var variableErrorsMap = make(map[string]map[string]string)
+
+		if len(variableErrorsAuthnMap) > 0 && len(variableErrorsAuthnMap[authn]) > 0 {
+
+			for variableID, errorMsg := range variableErrorsAuthnMap[authn] {
+				dests := p.secretsState.updateDestinations[variableID]
+				if dests != nil {
+					for _, dest := range dests {
+						if len(variableErrorsMap[dest.k8sSecretName]) == 0 {
+							variableErrorsMap[dest.k8sSecretName] = make(map[string]string)
+						}
+						variableErrorsMap[dest.k8sSecretName][variableID] = errorMsg
+					}
+				}
+			}
+
+		}
 
 		// Update K8s Secrets with the retrieved Conjur secrets
 		// k8sSecretFullName is  'ns/name' string format
@@ -711,7 +739,8 @@ func (p K8sProvider) updateRequiredK8sSecrets(
 					secretFullNameParsed[0],
 					secretFullNameParsed[1],
 					p.originalK8sSecrets[k8sSecretFullName],
-					secretData)
+					secretData,
+					variableErrorsMap[k8sSecretFullName])
 				if err != nil {
 					// Error messages returned from K8s should be printed only in debug mode
 					p.log.debug(messages.CSPFK005D, err.Error())

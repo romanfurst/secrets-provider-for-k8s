@@ -21,7 +21,7 @@ func (tc retrieveSecretsTestCase) Run(
 ) {
 	t.Run(tc.description, func(t *testing.T) {
 		s := createSecretGroups(tc.secretSpecs)
-		ret, err := FetchSecretsForGroups(depFetchSecrets, s, context.Background())
+		ret, err, _ := FetchSecretsForGroups(depFetchSecrets, s, context.Background())
 
 		tc.assert(t, ret, err)
 	})
