@@ -874,6 +874,28 @@ func (p K8sProvider) createGroupTemplateSecretData(authn string, conjurSecrets m
 						p.log.warn("secret alias %q not present in specified secrets for group", alias)
 						return ""
 					},
+					"b64enc": func(value string) string {
+						return base64.StdEncoding.EncodeToString([]byte(value))
+					},
+					"b64dec": func(encValue string) string {
+						decValue, err := base64.StdEncoding.DecodeString(encValue)
+						if err == nil {
+							return string(decValue)
+						}
+						// Panic in a template function is captured as an error
+						// when the template is executed.
+						panic("value could not be base64 decoded")
+					},
+					"concat": func(value ...string) string {
+						result := ""
+						if len(value) > 0 {
+							for i := range value {
+								result += value[i]
+							}
+							return result
+						}
+						return result
+					},
 				}).Parse(p.originalK8sSecrets[k8sSecretFullName].Annotations[pushtofile.SecretGroupFileTemplatePrefix+groupName])
 				if err != nil {
 					p.log.logError("Unable to get temaplate for %s group in %s secret: %s", groupName, k8sSecretFullName, err.Error())
