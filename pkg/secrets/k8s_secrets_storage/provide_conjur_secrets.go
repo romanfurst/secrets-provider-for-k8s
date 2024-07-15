@@ -103,6 +103,8 @@ type K8sProvider struct {
 	originalK8sSecrets map[string]*v1.Secret
 	//Map where key is authn name and value is  map of SecretGroups list where key is full k8sSecret name inf 'ns/name' format and value is list of its secret groups
 	secretsGroups map[string]map[string][]*pushtofile.SecretGroup
+	//Template values from last successful provide run. Outer map key = authn name.  Inner map key = variableID . Inner map value = value of variableID variable
+	prevVariablesValues map[string]map[string][]byte
 }
 
 // K8sProviderConfig provides config specific to Kubernetes Secrets provider
@@ -173,6 +175,7 @@ func newProvider(
 		prevSecretsChecksums: map[string]utils.Checksum{},
 		originalK8sSecrets:   map[string]*v1.Secret{},
 		secretsGroups:        map[string]map[string][]*pushtofile.SecretGroup{},
+		prevVariablesValues:  map[string]map[string][]byte{},
 	}
 }
 
@@ -675,7 +678,17 @@ func (p K8sProvider) retrieveConjurSecrets(tracer trace.Tracer) (map[string]map[
 			p.log.logError("CSPFK034E Failed to retrieve DAP/Conjur with '%s' authenticator. Reason: %s", authn, err.Error())
 			result[authn] = make(map[string][]byte)
 		} else {
+			for variableID, retrievedError := range retrievedErrors {
+				//for error variable try to use last known value
+				if !(strings.Contains(retrievedError, "403 Forbidden") || strings.Contains(retrievedError, "404 Not Found")) {
+					if p.prevVariablesValues[authn] != nil && p.prevVariablesValues[authn][variableID] != nil {
+						retrievedConjurSecrets[variableID] = p.prevVariablesValues[authn][variableID]
+					}
+				}
+			}
 			result[authn] = retrievedConjurSecrets
+			//update cache
+			p.prevVariablesValues[authn] = retrievedConjurSecrets
 		}
 	}
 	return result, nil, variableErrors
@@ -860,7 +873,15 @@ func (p K8sProvider) createGroupTemplateSecretData(authn string, conjurSecrets m
 
 				secretsMap := map[string]*pushtofile.Secret{}
 				for _, s := range sec {
-					secretsMap[s.Alias] = s
+					if s.Value != "" {
+						secretsMap[s.Alias] = s
+					}
+				}
+
+				//if there is no new account variables for given group template for some reason to avoid nullable Secret content we dont do anything, Secret content stay as is.
+				if len(secretsMap) == 0 {
+					p.log.warn("No new retrieved values available for group %s in %s secret. Content of the secret stay unchanged.", groupName, k8sSecretFullName)
+					continue
 				}
 
 				tpl, err := template.New(groupName).Funcs(template.FuncMap{
@@ -960,6 +981,9 @@ func (p K8sProvider) deleteK8sSecret(k8sFullSecretName string) {
 				delete(secretGroupsForAuthn, k8sFullSecretName)
 				break
 			}
+		}
+		if len(secretGroupsForAuthn) == 0 {
+			p.prevVariablesValues = nil
 		}
 	}
 
