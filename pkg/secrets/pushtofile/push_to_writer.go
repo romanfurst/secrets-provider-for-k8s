@@ -125,7 +125,7 @@ func writeContent(writer io.Writer, fileContent *bytes.Buffer, groupName string)
 	checksum, _ := utils.FileChecksum(fileContent)
 
 	// If file contents haven't changed, don't rewrite the file
-	if !utils.ContentHasChanged(groupName, checksum, prevFileChecksums) {
+	if prevFileChecksums[groupName] != nil && !utils.ContentHasChanged(checksum, prevFileChecksums[groupName]) {
 		log.Info(messages.CSPFK018I)
 		return false, nil
 	}

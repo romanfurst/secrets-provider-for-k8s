@@ -18,8 +18,8 @@ func FileChecksum(buf *bytes.Buffer) (Checksum, error) {
 	return checksum, nil
 }
 
-func ContentHasChanged(groupName string, newChecksum Checksum, prevChecksums map[string]Checksum) bool {
-	if prevChecksum, exists := prevChecksums[groupName]; exists {
+func ContentHasChanged(newChecksum Checksum, prevChecksum Checksum) bool {
+	if prevChecksum != nil {
 		if bytes.Equal(newChecksum, prevChecksum) {
 			return false
 		}
