@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"strings"
 
 	"github.com/cyberark/secrets-provider-for-k8s/pkg/log/messages"
 )
@@ -38,6 +39,10 @@ func RetrieveK8sSecret(namespace string, secretName string) (*v1.Secret, error) 
 }
 
 func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte, variablesErrorsMap ...map[string]string) error {
+	return updateK8sSecretWithRetry(true, namespace, secretName, originalK8sSecret, stringDataEntriesMap, variablesErrorsMap...)
+}
+
+func updateK8sSecretWithRetry(shouldRetry bool, namespace string, secretName string, originalK8sSecret *v1.Secret, stringDataEntriesMap map[string][]byte, variablesErrorsMap ...map[string]string) error {
 
 	if originalK8sSecret.Data == nil {
 		originalK8sSecret.Data = map[string][]byte{}
@@ -76,6 +81,14 @@ func UpdateK8sSecret(namespace string, secretName string, originalK8sSecret *v1.
 	if err != nil {
 		// Error messages returned from K8s should be printed only in debug mode
 		log.Debug(messages.CSPFK005D, err.Error())
+		//race condition  between period provisioning and   webhook provisioning might have occurred. Give it another chance
+		if shouldRetry && strings.Contains(err.Error(), "please apply your changes to the latest version and try again") {
+			originalK8sSecret, err = kubeClient.CoreV1().Secrets(namespace).Get(context.Background(), secretName, metav1.GetOptions{})
+			if err != nil {
+				log.Debug("Trying update secret one more time.")
+				return updateK8sSecretWithRetry(false, namespace, secretName, originalK8sSecret, stringDataEntriesMap, variablesErrorsMap...)
+			}
+		}
 		return log.RecordedError(messages.CSPFK022E)
 	}
 
