@@ -1,3 +1,55 @@
+# KB
+
+this is fork repository with KB modifications to improve password rotation  scenario.
+
+NOTE: current KB version is base on origin version 1.5.  
+
+### versioning
+
+custom modifications are held in branches `kb-implementation-<origin version>` where `<origin version>` means version of the origin product version on which out branch is based on.  
+
+E.g; kb-implementation-1.5 means it is a branch based on version 1.5.x of conjur-secret-provider  
+
+The commit from which new relase version is created must have version tag in format:  
+
+`<origin version>-KB.<kb version>`
+
+e.g.  
+current relase version `1.5.2-KB.7`  
+next relase version base on same origin version will be `1.5.2-KB.8`  
+
+
+### upgrading
+
+How migrate to newer conjur-secret-provider version:  
+
+- rebase current KB branch on top of new origin version and push it as new `kb-implementation-<origin version>` branch  
+
+or  
+
+- create new `kb-implementation-<origin version>` and cherry-pick or commits from previous `kb-implementation-` branch  
+
+E.g:  
+current branch: kb-implementation-1.5  
+afer upgrade: kb-implementation-1.6  
+
+also make new release tag e.g: `1.6.2-KB.1` (first KB version on the new origin version)  
+
+
+### build
+
+```
+docker buildx build --platform linux/amd64 --load --tag <docker-registry>/kb-secrets-provider-for-k8s:<versin> . -f ./Dockerfile
+```
+
+### relase
+
+- manually build image with release version tag
+- push to target docker registry
+- create and push git tag on commit from the build has been created (see versioning & upgrade)
+
+________________________________
+
 # Table of Contents
 
 - [Table of Contents](#table-of-contents)
