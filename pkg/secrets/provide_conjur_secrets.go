@@ -344,6 +344,13 @@ func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	secret, err, patchData, variableErrorsMsg = whsvr.provider.Mutate(secret)
+	if secret.Annotations == nil {
+		patch = append(patch, patchOperation{
+			Op:    "add",
+			Path:  "/metadata/annotations",
+			Value: map[string]string{},
+		})
+	}
 	if err != nil {
 		log.Error(err.Error())
 		patchOp = "add"
